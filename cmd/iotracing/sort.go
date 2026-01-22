@@ -25,7 +25,7 @@ func NewSortTable() *SortTable {
 		data: make(map[uint32]uint64),
 	}
 }
-
+//
 func (m *SortTable) Update(key uint32, value uint64) {
 	m.data[key] += value
 }
