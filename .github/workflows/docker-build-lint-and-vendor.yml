@@ -2,9 +2,9 @@ name: build, lint and vendor codes
 
 on:
   pull_request:
-    branches: [main]
+    branches: [my-dev]
   push:
-    branches: [main]
+    branches: [my-dev]
 
 jobs:
   lint-vendor-build:

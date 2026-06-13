@@ -2,9 +2,9 @@ name: OS Distro QEMU Test
 
 on:
   push:
-    branches: [ main ]
+    branches: [ my-dev ]
   pull_request:
-    branches: [ main ]
+    branches: [ my-dev ]
 
 jobs:
   # start VMs and test in them

@@ -6,12 +6,12 @@ env:
 on:
   push:
     branches:
-      - main
+      - my-dev
     paths:
       - 'docs/**'
       - 'data/img/**'
   pull_request:
-    branches: [main]
+    branches: [my-dev]
     paths:
       - 'docs/**'
       - 'data/img/**'
@@ -25,13 +25,13 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: ccfos/huatuo
-          ref: main
+          ref: my-dev
           path: huatuo
       - name: checkout huatuo web
         uses: actions/checkout@v4
         with:
           repository: hao022/huatuo-web
-          ref: main
+          ref: my-dev
           path: huatuo-web
           token: ${{ secrets.HUATUO_RELEASE_TOKEN }}
       - name: setup Hugo

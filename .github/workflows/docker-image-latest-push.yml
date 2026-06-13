@@ -3,7 +3,7 @@ name: build latest docker image
 on:
   push:
     branches:
-      - main
+      - my-dev
 
 jobs:
   buildx:
@@ -28,7 +28,7 @@ jobs:
           file: ./Dockerfile
           platforms: linux/amd64,linux/arm64/v8
           push: ${{ github.event_name != 'pull_request' }}
-          tags: huatuo/huatuo-bamai-static:latest
+          tags: 2408carpediem/huatuo-bamai-static:latest
 
       - name: Build and push (nostatic)
         uses: docker/build-push-action@v2
@@ -39,4 +39,4 @@ jobs:
           push: ${{ github.event_name != 'pull_request' }}
           build-args: |
             BUILD_MODE=nostatic
-          tags: huatuo/huatuo-bamai:latest
+          tags: 2408carpediem/huatuo-bamai:latest
