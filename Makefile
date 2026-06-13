@@ -49,7 +49,7 @@ IMAGE := $(IMAGE_REPO):$(IMAGE_TAG)
 
 BPF_BUILD_STAMP := $(APP_CMD_OUTPUT)/.bpf-build-stamp
 
-all: gen-build bpf-build build sync
+all: bpf-build build sync
 
 build-nostatic:
 	@$(MAKE) BUILD_MODE=nostatic all
@@ -72,7 +72,7 @@ sync:
 	@cp $(BPF_DIR)/*.o $(APP_CMD_OUTPUT)/bpf/
 	@cp *.conf $(APP_CMD_OUTPUT)/conf/
 
-build: gen-build $(APP_CMD_BIN_TARGETS)
+build: $(APP_CMD_BIN_TARGETS)
 $(APP_CMD_BIN_TARGETS): $(GO_SRCS)
 $(APP_CMD_OUTPUT)/bin/%:
 	@mkdir -p $(APP_CMD_OUTPUT)/bin
