@@ -36,6 +36,38 @@ skip() {
 
 # --------------------------------- utils ------------------------------------
 
+# nc_listen_cmd prints the nc listen invocation that works on this distro.
+# CentOS/RHEL ships nmap-ncat:  nc -l ADDRESS PORT
+# Ubuntu ships netcat-openbsd:  nc -l -s ADDRESS -p PORT
+# Usage: nc_listen_cmd <address> <port>
+nc_listen_cmd() {
+	local address=$1 port=$2
+	case "${NC_FLAVOR:-}" in
+	ncat) echo "nc -l ${address} ${port}" ;;
+	openbsd) echo "nc -l -s ${address} -p ${port}" ;;
+	*) fatal "unsupported nc flavor: ${NC_FLAVOR:-unknown}" ;;
+	esac
+}
+
+# detect_nc_flavor sets NC_FLAVOR to "ncat" or "openbsd" by inspecting --version.
+detect_nc_flavor() {
+	[[ -n "${NC_FLAVOR:-}" ]] && return 0
+	if nc --version 2>&1 | grep -qi ncat; then
+		NC_FLAVOR=ncat
+	elif nc --version 2>&1 | grep -qi "OpenBSD"; then
+		NC_FLAVOR=openbsd
+	else
+		fatal "unsupported nc implementation (need nmap-ncat or netcat-openbsd)"
+	fi
+	log_info "nc flavor: ${NC_FLAVOR}"
+}
+
+# require_nc aborts if no nc-compatible listener is available.
+require_nc() {
+	command -v nc > /dev/null 2>&1 || fatal "nc not found (CentOS: yum install -y nmap-ncat; Ubuntu: apt install -y netcat-openbsd)"
+	detect_nc_flavor
+}
+
 assert_eq() {
 	local actual=$1 expect=$2 msg=${3:-""}
 	[[ "$actual" == "$expect" ]] && return 0

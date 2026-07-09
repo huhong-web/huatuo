@@ -99,7 +99,12 @@ function install_golang() {
 function prapre_test_env() {
 	case $OS_DISTRO in
 	ubuntu*)
-		packages=("make" "libbpf-dev" "clang" "git" "gcc" "jq" "capnproto")
+		packages=(
+			# basic
+			"make" "libbpf-dev" "clang" "git" "gcc" "jq" "capnproto"
+			# tcpretrans integration test deps
+			"netcat-openbsd" "iptables" "iproute2"
+		)
 		missing_packages=()
 
 		for pkg in "${packages[@]}"; do
