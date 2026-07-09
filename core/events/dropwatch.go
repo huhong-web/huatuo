@@ -15,6 +15,7 @@
 package events
 
 import (
+	"bufio"
 	"context"
 	"fmt"
 	"os/exec"
@@ -59,9 +60,29 @@ func (c *dropWatchTracing) Start(ctx context.Context) error {
 	}
 
 	cmd := exec.Command(path.Join(internalconfig.CoreBinDir, "dropwatch"), args...)
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return fmt.Errorf("start dropwatch: stdout pipe: %w", err)
+	}
+	stderr, err := cmd.StderrPipe()
+	if err != nil {
+		return fmt.Errorf("start dropwatch: stderr pipe: %w", err)
+	}
 	if err := cmd.Start(); err != nil {
 		return fmt.Errorf("start dropwatch: %w", err)
 	}
+	go func() {
+		scanner := bufio.NewScanner(stdout)
+		for scanner.Scan() {
+			log.Warnf("dropwatch: %s", scanner.Text())
+		}
+	}()
+	go func() {
+		scanner := bufio.NewScanner(stderr)
+		for scanner.Scan() {
+			log.Warnf("dropwatch: %s", scanner.Text())
+		}
+	}()
 
 	log.Infof("dropwatch started pid=%d", cmd.Process.Pid)
 
@@ -100,6 +121,8 @@ func handleDropwatchEvent(_ *toolstream.Session, ev *types.DropWatchTracing) err
 		}
 		ev.ContainerID = pod.ResolveContainerIDFromMeta(meta)
 	}
+
+	globalDropCache.add(ev)
 
 	return tracing.Save(&tracing.WriteRequest{
 		TracerName:  "dropwatch",

@@ -28,7 +28,7 @@ import (
 // prefix family above.
 type DropWatchTracing struct {
 	ObservedTimestamp   string         `json:"observed_timestamp"`
-	Type                string         `json:"type"`
+	Type                string         `json:"type,omitempty"`
 	DropReason          string         `json:"drop_reason"`
 	Source              string         `json:"source,omitempty"`
 	Comm                string         `json:"comm"`

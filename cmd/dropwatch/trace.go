@@ -29,6 +29,8 @@ import (
 )
 
 func mainAction(c *cli.Context) error {
+	reasonNames = loadDropReasonNames()
+
 	duration := c.Int(cliFlagDuration)
 	outputFmt := c.String(cliFlagOutput)
 
