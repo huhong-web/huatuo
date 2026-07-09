@@ -23,7 +23,6 @@ import (
 	"strings"
 	"time"
 
-	"huatuo-bamai/internal/cgroups/subsystem"
 	internalconfig "huatuo-bamai/internal/config"
 	"huatuo-bamai/internal/log"
 	"huatuo-bamai/internal/matcher"
@@ -92,7 +91,14 @@ func handleDropwatchEvent(_ *toolstream.Session, ev *types.DropWatchTracing) err
 	}
 
 	if ev.ContainerID == "" {
-		ev.ContainerID = resolveContainerIDFromMeta(ev)
+		meta := pod.ContainerMeta{
+			NetNamespaceCookie: ev.NetNamespaceCookie,
+			NetNamespaceInode:  uint64(ev.NetNamespaceInode),
+		}
+		if addr, ok := kernaddr.Parse(ev.MemoryCgroupCSSAddr); ok {
+			meta.MemoryCgroupCSSAddr = addr
+		}
+		ev.ContainerID = pod.ResolveContainerIDFromMeta(meta)
 	}
 
 	return tracing.Save(&tracing.WriteRequest{
@@ -101,41 +107,6 @@ func handleDropwatchEvent(_ *toolstream.Session, ev *types.DropWatchTracing) err
 		TracerTime:  time.Now(),
 		TracerData:  ev,
 	})
-}
-
-func resolveContainerIDFromMeta(ev *types.DropWatchTracing) string {
-	// 1. memcg CSS address — uniquely identifies a container.
-	if addr, ok := kernaddr.Parse(ev.MemoryCgroupCSSAddr); ok {
-		ct, err := pod.ContainerByCSS(addr, subsystem.SubsystemMemory)
-		if err != nil {
-			log.Debugf("dropwatch: CSS lookup %s: %v", ev.MemoryCgroupCSSAddr, err)
-		} else if ct != nil {
-			return ct.ID
-		}
-	}
-
-	// 2. net namespace cookie — unique per netns; not available on kernels < 5.14.
-	// Returns one container sharing the namespace.
-	if ev.NetNamespaceCookie != 0 {
-		ct, err := pod.ContainerByNetCookie(ev.NetNamespaceCookie)
-		if err != nil {
-			log.Debugf("dropwatch: net_cookie lookup %d: %v", ev.NetNamespaceCookie, err)
-		} else if ct != nil {
-			return ct.ID
-		}
-	}
-
-	// 3. net namespace inode — always available, returns one container sharing the namespace.
-	if ev.NetNamespaceInode != 0 {
-		ct, err := pod.ContainerByNetInode(uint64(ev.NetNamespaceInode))
-		if err != nil {
-			log.Debugf("dropwatch: net_inum lookup %d: %v", ev.NetNamespaceInode, err)
-		} else if ct != nil {
-			return ct.ID
-		}
-	}
-
-	return ""
 }
 
 // ignoreDropwatch returns true for known-noisy events that should not be forwarded.

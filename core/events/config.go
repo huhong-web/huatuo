@@ -40,6 +40,10 @@ type Config struct {
 		ExcludeContainers  []string
 	}
 
+	TcpRetrans struct {
+		Filter string `default:""`
+	}
+
 	Netdev struct {
 		DeviceList []string
 	}

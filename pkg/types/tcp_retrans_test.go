@@ -1,0 +1,146 @@
+// Copyright 2026 The HuaTuo Authors
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+package types
+
+import (
+	"encoding/json"
+	"testing"
+
+	"github.com/google/go-cmp/cmp"
+)
+
+func TestTCPRetransTracingRoundTrip(t *testing.T) {
+	tests := []struct {
+		name string
+		ev   *TCPRetransTracing
+	}{
+		{
+			name: "full_event",
+			ev: &TCPRetransTracing{
+				ObservedTimestamp:  "2026-07-08T09:19:52.042035335Z",
+				Comm:               "kube-apiserver",
+				Pid:                1234,
+				ContainerID:        "abc123",
+				MemcgCssAddr:       0x1000,
+				NetNamespaceCookie: 0x2000,
+				NetNamespaceInode:  4026531992,
+				Saddr:              "10.0.0.1",
+				Daddr:              "10.0.0.2",
+				Sport:              6443,
+				Dport:              58244,
+				Family:             2,
+				State:              "ESTABLISHED",
+				Phase:              "data",
+				Reason:             "TLP",
+				EventType:          "tcp_send_loss_probe",
+				CaState:            0,
+				IcskRetransmits:    0,
+				IcskPending:        5,
+				ReordSeen:          10,
+				DsackDups:          2,
+				TCPSeq:             123456,
+				TCPAck:             789012,
+				SkbAddr:            "",
+				ProgMarker:         0xA3,
+				DropLocation:       "network_or_host_hardware",
+				Source:             "events",
+			},
+		},
+		{
+			name: "minimal_event",
+			ev: &TCPRetransTracing{
+				ObservedTimestamp: "2026-07-08T00:00:00Z",
+				Saddr:             "::",
+				Daddr:             "::",
+				Sport:             80,
+				Dport:             443,
+				Family:            10,
+				State:             "ESTABLISHED",
+				Phase:             "data",
+				Reason:            "RTO",
+				EventType:         "tcp_retransmit_skb",
+			},
+		},
+		{
+			name: "synack_zero_seq",
+			ev: &TCPRetransTracing{
+				ObservedTimestamp: "2026-07-08T00:00:00Z",
+				Saddr:             "10.0.0.1",
+				Daddr:             "10.0.0.2",
+				Sport:             6443,
+				Dport:             50000,
+				Family:            2,
+				State:             "NEW_SYN_RECV",
+				Phase:             "connect",
+				Reason:            "RTO",
+				EventType:         "tcp_retransmit_synack",
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			b, err := json.Marshal(tt.ev)
+			if err != nil {
+				t.Fatalf("Marshal: %v", err)
+			}
+
+			var got TCPRetransTracing
+			if err := json.Unmarshal(b, &got); err != nil {
+				t.Fatalf("Unmarshal: %v", err)
+			}
+
+			if diff := cmp.Diff(tt.ev, &got); diff != "" {
+				t.Errorf("round-trip mismatch (-want +got):\n%s", diff)
+			}
+		})
+	}
+}
+
+func TestTCPRetransTracingOmitEmpty(t *testing.T) {
+	ev := &TCPRetransTracing{
+		ObservedTimestamp: "2026-07-08T00:00:00Z",
+		Saddr:             "10.0.0.1",
+		Daddr:             "10.0.0.2",
+		Sport:             80,
+		Dport:             443,
+		Family:            2,
+		State:             "ESTABLISHED",
+		Phase:             "data",
+		Reason:            "RTO",
+		EventType:         "tcp_retransmit_skb",
+	}
+
+	b, err := json.Marshal(ev)
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+
+	var raw map[string]any
+	if err := json.Unmarshal(b, &raw); err != nil {
+		t.Fatalf("Unmarshal to map: %v", err)
+	}
+
+	omitFields := []string{
+		"container_id", "memcg_css", "net_namespace_cookie", "net_namespace_inode",
+		"reord_seen", "dsack_dups", "tcp_seq", "tcp_ack",
+		"skb_addr", "prog_marker", "drop_location", "source",
+	}
+	for _, f := range omitFields {
+		if _, ok := raw[f]; ok {
+			t.Errorf("omitempty field %q should be absent, got %v", f, raw[f])
+		}
+	}
+}
