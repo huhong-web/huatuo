@@ -1,0 +1,78 @@
+// Copyright 2026 The HuaTuo Authors
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+package main
+
+import (
+	"fmt"
+
+	"github.com/urfave/cli/v2"
+
+	"huatuo-bamai/internal/log"
+)
+
+const (
+	cliFlagBpfPath       = "bpf-path"
+	cliFlagFilter        = "filter"
+	cliFlagDuration      = "duration"
+	cliFlagOutput        = "output"
+	cliFlagOutputStorage = "output-storage"
+	cliFlagTaskID        = "task-id"
+)
+
+const (
+	outputText = "text"
+	outputJSON = "json"
+)
+
+func appFlags() []cli.Flag {
+	return []cli.Flag{
+		&cli.StringFlag{
+			Name:     cliFlagBpfPath,
+			Usage:    "path to the tcpretrans BPF object file",
+			Required: true,
+		},
+		&cli.StringFlag{
+			Name:  cliFlagFilter,
+			Usage: "pcap filter expression (tcpdump syntax); empty = all TCP retransmissions",
+		},
+		&cli.IntFlag{
+			Name:  cliFlagDuration,
+			Usage: "run for N seconds then exit (0=forever)",
+		},
+		&cli.StringFlag{
+			Name:  cliFlagOutput,
+			Value: outputText,
+			Usage: "output format: json or text; ignored when --output-storage is set",
+		},
+		&cli.StringFlag{
+			Name:  cliFlagOutputStorage,
+			Usage: "unix socket path to send events to; when set, --output is ignored",
+		},
+		&cli.StringFlag{
+			Name:  cliFlagTaskID,
+			Usage: "task ID to associate with this session (requires --output-storage)",
+		},
+	}
+}
+
+func validateFlags(c *cli.Context) error {
+	if v := c.String(cliFlagOutput); v != outputJSON && v != outputText {
+		return fmt.Errorf("--output: invalid value %q, want json or text", v)
+	}
+	if c.IsSet(cliFlagOutput) && c.String(cliFlagOutputStorage) != "" {
+		log.Warnf("--output is ignored because --output-storage is set")
+	}
+	return nil
+}

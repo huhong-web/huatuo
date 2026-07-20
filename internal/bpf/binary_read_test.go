@@ -76,7 +76,6 @@ func TestRetransEventBinaryLayout(t *testing.T) {
 	raw[94] = 4
 	raw[95] = 3
 	raw[96] = 1
-	raw[97] = 0xa1
 	binary.NativeEndian.PutUint16(raw[98:], 0)
 	raw[100] = 5
 	binary.NativeEndian.PutUint32(raw[104:], 10)
@@ -104,7 +103,6 @@ func TestRetransEventBinaryLayout(t *testing.T) {
 		CaState:         4,
 		IcskRetransmits: 3,
 		EventType:       1,
-		Pad:             0xa1,
 		IcskPending:     5,
 		ReordSeen:       10,
 		DsackDups:       5,

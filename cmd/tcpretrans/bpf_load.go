@@ -15,32 +15,20 @@
 package main
 
 import (
+	"fmt"
 	"os"
+	"time"
 
-	"github.com/urfave/cli/v2"
-
-	"huatuo-bamai/internal/log"
+	"huatuo-bamai/internal/bpf"
+	"huatuo-bamai/internal/pcapfilter"
 )
 
-//go:generate $BPF_COMPILE $BPF_INCLUDE -s $BPF_DIR/tcp_retrans.c -o $BPF_DIR/tcp_retrans.o
-
-var (
-	tcpRetransToolName = "tcpretrans"
-	AppVersion         = ""
-)
-
-func main() {
-	app := &cli.App{
-		Name:    tcpRetransToolName,
-		Version: AppVersion,
-		Usage:   "watch TCP retransmissions classified by connection state machine phase",
-		Flags:   appFlags(),
-		Action:  mainAction,
-		Before:  validateFlags,
+func loadTCPRetransBPFWithFilter(bpfPath, filterExpr string) (bpf.BPF, error) {
+	bpfBytes, err := os.ReadFile(bpfPath)
+	if err != nil {
+		return nil, fmt.Errorf("read bpf object: %w", err)
 	}
 
-	if err := app.Run(os.Args); err != nil {
-		log.Errorf("%v", err)
-		os.Exit(1)
-	}
+	bpfName := fmt.Sprintf("tcp_retrans_%d.o", time.Now().UnixNano())
+	return pcapfilter.Load(bpfName, bpfBytes, filterExpr, nil)
 }

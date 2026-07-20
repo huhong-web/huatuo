@@ -65,8 +65,7 @@ type TCPRetransTracing struct {
 	TCPAck uint32 `json:"tcp_ack,omitempty"`
 
 	// Kernel internals
-	SkbAddr    string `json:"skb_addr,omitempty"`    // the sk_buff pointer being retransmitted
-	ProgMarker uint8  `json:"prog_marker,omitempty"` // BPF prog identifier: 0xA1=skb, 0xA2=synack, 0xA3=TLP
+	SkbAddr string `json:"skb_addr,omitempty"` // the sk_buff pointer being retransmitted
 
 	// Correlation with dropwatch / netdev_hw
 	DropLocation string `json:"drop_location,omitempty"` // "host_software", "network_or_host_hardware", or "unknown"

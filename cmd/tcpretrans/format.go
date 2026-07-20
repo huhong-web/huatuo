@@ -18,9 +18,16 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"os"
+	"time"
 
+	"golang.org/x/sys/unix"
+
+	"huatuo-bamai/internal/packet"
 	"huatuo-bamai/internal/toolstream"
+	"huatuo-bamai/internal/utils/bytesutil"
+	"huatuo-bamai/internal/utils/kernaddr"
 	"huatuo-bamai/pkg/types"
 )
 
@@ -32,8 +39,16 @@ type writer interface {
 type textWriter struct{ w io.Writer }
 
 func (s *textWriter) Write(ev *types.TCPRetransTracing) error {
-	detail := fmt.Sprintf("[%s/%s] %s:%d > %s:%d state=%s",
-		ev.Phase, ev.Reason, ev.Saddr, ev.Sport, ev.Daddr, ev.Dport, ev.State)
+	detail := fmt.Sprintf(
+		"[%s/%s] %s:%d > %s:%d state=%s",
+		ev.Phase,
+		ev.Reason,
+		ev.Saddr,
+		ev.Sport,
+		ev.Daddr,
+		ev.Dport,
+		ev.State,
+	)
 	if ev.EventType == "tcp_retransmit_synack" {
 		detail += " [SYNACK]"
 	}
@@ -43,8 +58,16 @@ func (s *textWriter) Write(ev *types.TCPRetransTracing) error {
 	if ev.TCPSeq != 0 || ev.TCPAck != 0 {
 		detail += fmt.Sprintf(" seq=%d ack=%d", ev.TCPSeq, ev.TCPAck)
 	}
-	_, err := fmt.Fprintf(s.w, "%s %s pid=%d[%s] ca=%d retrans=%d\n",
-		ev.ObservedTimestamp, detail, ev.Pid, ev.Comm, ev.CaState, ev.IcskRetransmits)
+	_, err := fmt.Fprintf(
+		s.w,
+		"%s %s pid=%d[%s] ca=%d retrans=%d\n",
+		ev.ObservedTimestamp,
+		detail,
+		ev.Pid,
+		ev.Comm,
+		ev.CaState,
+		ev.IcskRetransmits,
+	)
 	return err
 }
 
@@ -66,13 +89,112 @@ func (s *socketWriter) Write(ev *types.TCPRetransTracing) error {
 	return s.client.Send(ev)
 }
 
-func newWriter(outputFmt string, client *toolstream.Client) writer {
-	switch {
-	case client != nil:
-		return &socketWriter{client: client}
-	case outputFmt == "json":
-		return &jsonWriter{w: os.Stdout}
-	default:
-		return &textWriter{w: os.Stdout}
+type writerOption struct {
+	outputFmt string
+	sockPath  string
+	toolName  string
+	version   string
+	taskID    string
+}
+
+func newWriter(opt *writerOption) (writer, func(), error) {
+	if opt.sockPath != "" {
+		client, err := toolstream.NewClient(toolstream.ClientOptions{
+			SockPath: opt.sockPath,
+			ToolName: opt.toolName,
+			Version:  opt.version,
+			TaskID:   opt.taskID,
+		})
+		if err != nil {
+			return nil, nil, fmt.Errorf("tcpretrans: --output-storage: %w", err)
+		}
+		return &socketWriter{client: client}, client.End, nil
 	}
+
+	switch opt.outputFmt {
+	case outputJSON:
+		return &jsonWriter{w: os.Stdout}, func() {}, nil
+	default:
+		return &textWriter{w: os.Stdout}, func() {}, nil
+	}
+}
+
+func formatEvent(ev *retransEvent) *types.TCPRetransTracing {
+	phase, reason := classifyEvent(ev)
+
+	var saddr, daddr string
+	switch ev.Family {
+	case unix.AF_INET:
+		saddr = net.IP(ev.Saddr[:]).String()
+		daddr = net.IP(ev.Daddr[:]).String()
+	case unix.AF_INET6:
+		saddr = net.IP(ev.SaddrV6[:]).String()
+		daddr = net.IP(ev.DaddrV6[:]).String()
+	}
+
+	eventTypeStr := "unknown"
+	switch ev.EventType {
+	case retransEventSKU:
+		eventTypeStr = "tcp_retransmit_skb"
+	case retransEventSynack:
+		eventTypeStr = "tcp_retransmit_synack"
+	case retransEventTLP:
+		eventTypeStr = "tcp_send_loss_probe"
+	}
+
+	return &types.TCPRetransTracing{
+		ObservedTimestamp:  time.Now().UTC().Format(time.RFC3339Nano),
+		Comm:               bytesutil.ToStr(ev.Comm[:]),
+		Pid:                ev.TgidPid >> 32,
+		MemcgCssAddr:       ev.MemcgCssAddr,
+		NetNamespaceCookie: ev.NetCookie,
+		NetNamespaceInode:  ev.NetInode,
+		Saddr:              saddr,
+		Daddr:              daddr,
+		Sport:              ev.Sport,
+		Dport:              ev.Dport,
+		Family:             ev.Family,
+		State:              tcpStateNameRaw(uint8(ev.State)),
+		Phase:              phase.String(),
+		Reason:             reason.String(),
+		EventType:          eventTypeStr,
+		CaState:            ev.CaState,
+		IcskRetransmits:    ev.IcskRetransmits,
+		IcskPending:        ev.IcskPending,
+		ReordSeen:          ev.ReordSeen,
+		DsackDups:          ev.DsackDups,
+		TCPSeq:             ev.TCPSeq,
+		TCPAck:             ev.TCPAck,
+		SkbAddr:            kernaddr.Format(ev.SkbAddr),
+	}
+}
+
+func classifyEvent(ev *retransEvent) (packet.RetransPhase, packet.RetransReason) {
+	switch ev.EventType {
+	case retransEventSynack:
+		return packet.RetransPhaseConnect, packet.RetransReasonRTO
+	case retransEventTLP:
+		return packet.RetransPhaseData, packet.RetransReasonTLP
+	default:
+		return packet.ClassifyRetrans(
+			uint8(ev.State),
+			"",
+			ev.CaState,
+			ev.IcskPending,
+			ev.ReordSeen,
+			ev.DsackDups,
+		)
+	}
+}
+
+func tcpStateNameRaw(state uint8) string {
+	names := []string{
+		"unknown", "ESTABLISHED", "SYN_SENT", "SYN_RECV",
+		"FIN_WAIT1", "FIN_WAIT2", "TIME_WAIT", "CLOSE",
+		"CLOSE_WAIT", "LAST_ACK", "LISTEN", "CLOSING", "NEW_SYN_RECV",
+	}
+	if int(state) < len(names) {
+		return names[state]
+	}
+	return fmt.Sprintf("UNKNOWN(%d)", state)
 }

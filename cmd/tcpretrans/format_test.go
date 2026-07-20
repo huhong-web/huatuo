@@ -16,10 +16,21 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"testing"
+
+	"huatuo-bamai/pkg/types"
 )
 
+type errWriter struct{ err error }
+
+func (w errWriter) Write(_ []byte) (int, error) {
+	return 0, w.err
+}
+
 func TestFormatEventSkbAddr(t *testing.T) {
+	t.Parallel()
+
 	tests := []struct {
 		name    string
 		skbAddr uint64
@@ -39,6 +50,8 @@ func TestFormatEventSkbAddr(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
 			event := formatEvent(&retransEvent{SkbAddr: tt.skbAddr})
 			if event.SkbAddr != tt.want {
 				t.Fatalf("SkbAddr = %q, want %q", event.SkbAddr, tt.want)
@@ -48,10 +61,11 @@ func TestFormatEventSkbAddr(t *testing.T) {
 			if err != nil {
 				t.Fatalf("Marshal: %v", err)
 			}
-			var fields map[string]any
+			fields := map[string]any{}
 			if err := json.Unmarshal(encoded, &fields); err != nil {
 				t.Fatalf("Unmarshal: %v", err)
 			}
+
 			got, present := fields["skb_addr"]
 			if tt.omitted && present {
 				t.Fatalf("skb_addr = %v, want omitted", got)
@@ -60,5 +74,29 @@ func TestFormatEventSkbAddr(t *testing.T) {
 				t.Fatalf("skb_addr = %v, want %q", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestTextWriterPropagatesIOError(t *testing.T) {
+	t.Parallel()
+
+	boom := errors.New("boom")
+	w := &textWriter{w: errWriter{err: boom}}
+
+	err := w.Write(&types.TCPRetransTracing{ObservedTimestamp: "now"})
+	if !errors.Is(err, boom) {
+		t.Fatalf("Write() error = %v, want %v", err, boom)
+	}
+}
+
+func TestJSONWriterPropagatesIOError(t *testing.T) {
+	t.Parallel()
+
+	boom := errors.New("boom")
+	w := &jsonWriter{w: errWriter{err: boom}}
+
+	err := w.Write(&types.TCPRetransTracing{ObservedTimestamp: "now"})
+	if !errors.Is(err, boom) {
+		t.Fatalf("Write() error = %v, want %v", err, boom)
 	}
 }

@@ -11,16 +11,13 @@
 #include "bpf_cgroup.h"
 #include "bpf_net_namespace.h"
 #include "bpf_pcap_stub.h"
+#include "bpf_skb.h"
 #include "bpf_tcp_reorder.h"
 #include "vmlinux_net.h"
 
 #define RETRANS_EVENT_SKB    1
 #define RETRANS_EVENT_SYNACK 2
 #define RETRANS_EVENT_TLP    3
-
-#define PROG_MARKER_SKB    0xA1
-#define PROG_MARKER_SYNACK 0xA2
-#define PROG_MARKER_TLP    0xA3
 
 #define TCP_NEW_SYN_RECV 12
 
@@ -149,25 +146,6 @@ static __always_inline void read_icsk_pending(struct sock *sk, struct retrans_ev
 		ev->icsk_pending = BPF_CORE_READ(icsk, icsk_pending);
 }
 
-/* Read TCP seq/ack from the skb's transport header.  For a retransmitted
- * segment this is the exact sequence number of the retransmitted data.
- * The header fields are network-byte-order (__be32); we convert to host
- * order. */
-static __always_inline void read_tcp_seq_ack_from_skb(struct sk_buff *skb,
-						       struct retrans_event *ev)
-{
-	struct tcphdr th;
-
-	if (!skb)
-		return;
-
-	if (bpf_probe_read(&th, sizeof(th), skb_transport_header(skb)) < 0)
-		return;
-
-	ev->tcp_seq = bpf_ntohl(th.seq);
-	ev->tcp_ack = bpf_ntohl(th.ack_seq);
-}
-
 /* Read snd_nxt / snd_una from tcp_sock.  Used when no skb is available
  * (TLP): snd_nxt is the next sequence number to send (closest approximation
  * of the probe seq), snd_una is the unacknowledged sequence number. */
@@ -183,6 +161,38 @@ static __always_inline void read_snd_nxt_una_from_sk(struct sock *sk,
 		ev->tcp_ack = BPF_CORE_READ(tp, snd_una);
 }
 
+static __always_inline void fill_retrans_event_from_sk(struct retrans_event *ev,
+							struct sock *sk)
+{
+	if (!sk)
+		return;
+
+	ev->state = BPF_CORE_READ(sk, __sk_common.skc_state);
+	ev->family = BPF_CORE_READ(sk, __sk_common.skc_family);
+	ev->sport = BPF_CORE_READ(sk, __sk_common.skc_num);
+	ev->dport = bpf_ntohs(BPF_CORE_READ(sk, __sk_common.skc_dport));
+	ev->ca_state = read_ca_state(sk);
+	if (bpf_core_field_exists(((struct inet_connection_sock *)0)->icsk_retransmits))
+		ev->icsk_retransmits = BPF_CORE_READ((struct inet_connection_sock *)sk,
+						      icsk_retransmits);
+
+	ev->memcg_css_addr = sk_memcg_css_addr(sk);
+	ev->net_cookie = sk_netns_cookie(sk);
+	ev->net_inum = sk_netns_inum(sk);
+
+	read_icsk_pending(sk, ev);
+
+	struct reorder_metrics rm = {};
+	read_reorder_metrics(sk, &rm);
+	ev->reord_seen = rm.reord_seen;
+	ev->dsack_dups = rm.dsack_dups;
+
+	if (ev->family == AF_INET)
+		fill_addrs_v4_from_sk(ev, sk);
+	else if (ev->family == AF_INET6)
+		fill_addrs_v6_from_sk(ev, sk);
+}
+
 struct tcp_retransmit_skb_ctx {
 	unsigned short common_type;
 	unsigned char common_flags;
@@ -196,50 +206,30 @@ struct tcp_retransmit_skb_ctx {
 SEC("tracepoint/tcp/tcp_retransmit_skb")
 int tcp_retransmit_skb_prog(struct tcp_retransmit_skb_ctx *ctx)
 {
+	struct sk_buff *skb = (struct sk_buff *)ctx->skbaddr;
+
+	if (skb && !PCAP_STUB_PASS_SKB(skb))
+		return 0;
+
 	struct retrans_event ev = {};
 
 	ev.event_type = RETRANS_EVENT_SKB;
-	ev._pad = PROG_MARKER_SKB;
 	ev.ktime_ns = bpf_ktime_get_ns();
 	ev.tgid_pid = bpf_get_current_pid_tgid();
 	bpf_get_current_comm(&ev.comm, sizeof(ev.comm));
 
 	struct sock *sk = (struct sock *)ctx->skaddr;
-	struct sk_buff *skb = (struct sk_buff *)ctx->skbaddr;
 
 	ev.skb_addr = (u64)(unsigned long)skb;
+	fill_retrans_event_from_sk(&ev, sk);
 
-	if (sk) {
-		ev.state = BPF_CORE_READ(sk, __sk_common.skc_state);
-		ev.family = BPF_CORE_READ(sk, __sk_common.skc_family);
-		ev.sport = BPF_CORE_READ(sk, __sk_common.skc_num);
-		ev.dport = bpf_ntohs(BPF_CORE_READ(sk, __sk_common.skc_dport));
-		ev.ca_state = read_ca_state(sk);
-		if (bpf_core_field_exists(((struct inet_connection_sock *)0)->icsk_retransmits))
-			ev.icsk_retransmits = BPF_CORE_READ((struct inet_connection_sock *)sk, icsk_retransmits);
-
-		ev.memcg_css_addr = sk_memcg_css_addr(sk);
-		ev.net_cookie = sk_netns_cookie(sk);
-		ev.net_inum = sk_netns_inum(sk);
-
-		read_icsk_pending(sk, &ev);
-
-		struct reorder_metrics rm = {};
-		read_reorder_metrics(sk, &rm);
-		ev.reord_seen = rm.reord_seen;
-		ev.dsack_dups = rm.dsack_dups;
+	/* For a retransmitted segment these are the exact sequence and
+	 * acknowledgement numbers from the TCP header. */
+	struct tcphdr tcp_hdr = {};
+	if (skb_read_tcp_header(skb, &tcp_hdr)) {
+		ev.tcp_seq = bpf_ntohl(tcp_hdr.seq);
+		ev.tcp_ack = bpf_ntohl(tcp_hdr.ack_seq);
 	}
-
-	if (ev.family == AF_INET) {
-		fill_addrs_v4_from_sk(&ev, sk);
-	} else if (ev.family == AF_INET6) {
-		fill_addrs_v6_from_sk(&ev, sk);
-	}
-
-	if (skb && !PCAP_STUB_PASS_SKB(skb))
-		return 0;
-
-	read_tcp_seq_ack_from_skb(skb, &ev);
 
 	bpf_perf_event_output(ctx, &perf_events, COMPAT_BPF_F_CURRENT_CPU, &ev, sizeof(ev));
 	return 0;
@@ -261,7 +251,6 @@ int tcp_retransmit_synack_prog(struct tcp_retransmit_synack_ctx *ctx)
 	struct retrans_event ev = {};
 
 	ev.event_type = RETRANS_EVENT_SYNACK;
-	ev._pad = PROG_MARKER_SYNACK;
 	ev.ktime_ns = bpf_ktime_get_ns();
 	ev.tgid_pid = bpf_get_current_pid_tgid();
 	bpf_get_current_comm(&ev.comm, sizeof(ev.comm));
@@ -305,7 +294,6 @@ int tcp_send_loss_probe_kprobe(struct pt_regs *ctx)
 	struct retrans_event ev = {};
 
 	ev.event_type = RETRANS_EVENT_TLP;
-	ev._pad = PROG_MARKER_TLP;
 	ev.ktime_ns = bpf_ktime_get_ns();
 	ev.tgid_pid = bpf_get_current_pid_tgid();
 	bpf_get_current_comm(&ev.comm, sizeof(ev.comm));
@@ -314,34 +302,10 @@ int tcp_send_loss_probe_kprobe(struct pt_regs *ctx)
 	if (!sk)
 		return 0;
 
-	ev.state = BPF_CORE_READ(sk, __sk_common.skc_state);
-	ev.family = BPF_CORE_READ(sk, __sk_common.skc_family);
-	ev.sport = BPF_CORE_READ(sk, __sk_common.skc_num);
-	ev.dport = bpf_ntohs(BPF_CORE_READ(sk, __sk_common.skc_dport));
-	ev.ca_state = read_ca_state(sk);
-	if (bpf_core_field_exists(((struct inet_connection_sock *)0)->icsk_retransmits))
-		ev.icsk_retransmits = BPF_CORE_READ((struct inet_connection_sock *)sk, icsk_retransmits);
-
-	ev.memcg_css_addr = sk_memcg_css_addr(sk);
-	ev.net_cookie = sk_netns_cookie(sk);
-	ev.net_inum = sk_netns_inum(sk);
-
-	read_icsk_pending(sk, &ev);
-
-	struct reorder_metrics rm = {};
-	read_reorder_metrics(sk, &rm);
-	ev.reord_seen = rm.reord_seen;
-	ev.dsack_dups = rm.dsack_dups;
-
 	ev.skb_addr = 0;
+	fill_retrans_event_from_sk(&ev, sk);
 
 	read_snd_nxt_una_from_sk(sk, &ev);
-
-	if (ev.family == AF_INET) {
-		fill_addrs_v4_from_sk(&ev, sk);
-	} else if (ev.family == AF_INET6) {
-		fill_addrs_v6_from_sk(&ev, sk);
-	}
 
 	bpf_perf_event_output(ctx, &perf_events, COMPAT_BPF_F_CURRENT_CPU, &ev, sizeof(ev));
 	return 0;
