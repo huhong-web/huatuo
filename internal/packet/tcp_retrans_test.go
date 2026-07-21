@@ -21,15 +21,14 @@ import (
 
 func TestClassifyRetrans(t *testing.T) {
 	tests := []struct {
-		name        string
-		skState     uint8
-		tcpFlags    string
-		caState     uint8
-		icskPending uint8
-		reordSeen   uint32
-		dsackDups   uint32
-		wantPhase   RetransPhase
-		wantReason  RetransReason
+		name       string
+		skState    uint8
+		tcpFlags   string
+		caState    uint8
+		reordSeen  uint32
+		dsackDups  uint32
+		wantPhase  RetransPhase
+		wantReason RetransReason
 	}{
 		// === Connect phase ===
 		{
@@ -67,82 +66,40 @@ func TestClassifyRetrans(t *testing.T) {
 
 		// === Data phase: RTO ===
 		{
-			name:        "RTO retrans (ESTABLISHED + Loss + pending=0)",
-			skState:     1,
-			tcpFlags:    "ACK",
-			caState:     4,
-			icskPending: 0,
-			wantPhase:   RetransPhaseData,
-			wantReason:  RetransReasonRTO,
-		},
-		{
-			name:        "RTO recovery supplement (Loss + pending!=0)",
-			skState:     1,
-			tcpFlags:    "ACK",
-			caState:     4,
-			icskPending: 1,
-			wantPhase:   RetransPhaseData,
-			wantReason:  RetransReasonRTO,
+			name:       "RTO retrans (ESTABLISHED + Loss)",
+			skState:    1,
+			tcpFlags:   "ACK",
+			caState:    4,
+			wantPhase:  RetransPhaseData,
+			wantReason: RetransReasonRTO,
 		},
 
 		// === Data phase: Fast retransmit ===
 		{
-			name:        "Fast retrans dup ACK (Recovery + pending!=6)",
-			skState:     1,
-			tcpFlags:    "ACK",
-			caState:     3,
-			icskPending: 1,
-			wantPhase:   RetransPhaseData,
-			wantReason:  RetransReasonFast,
-		},
-		{
-			name:        "Fast retrans RACK reo timer (Recovery + pending==6)",
-			skState:     1,
-			tcpFlags:    "ACK",
-			caState:     3,
-			icskPending: 6,
-			wantPhase:   RetransPhaseData,
-			wantReason:  RetransReasonFast,
-		},
-
-		// === Data phase: TLP ===
-		{
-			name:        "TLP (Open + pending==5)",
-			skState:     1,
-			tcpFlags:    "ACK",
-			caState:     0,
-			icskPending: 5,
-			wantPhase:   RetransPhaseData,
-			wantReason:  RetransReasonTLP,
-		},
-		{
-			name:        "TLP (CWR + pending==5)",
-			skState:     1,
-			tcpFlags:    "ACK",
-			caState:     2,
-			icskPending: 5,
-			wantPhase:   RetransPhaseData,
-			wantReason:  RetransReasonTLP,
+			name:       "Fast retrans (Recovery)",
+			skState:    1,
+			tcpFlags:   "ACK",
+			caState:    3,
+			wantPhase:  RetransPhaseData,
+			wantReason: RetransReasonFast,
 		},
 
 		// === Data phase: Unknown ===
 		{
-			name:        "Unknown (Open + pending=0, no TLP)",
-			skState:     1,
-			tcpFlags:    "ACK",
-			caState:     0,
-			icskPending: 0,
-			wantPhase:   RetransPhaseData,
-			wantReason:  RetransReasonUnknown,
+			name:       "Unknown (Open)",
+			skState:    1,
+			tcpFlags:   "ACK",
+			caState:    0,
+			wantPhase:  RetransPhaseData,
+			wantReason: RetransReasonUnknown,
 		},
 		{
-			name:        "Unknown (Disorder + pending=1)",
-			skState:     1,
-			tcpFlags:    "ACK",
-			caState:     1,
-			icskPending: 1,
-			wantPhase:   RetransPhaseData,
-			wantReason:  RetransReasonUnknown,
+			name:       "Unknown (Disorder)",
+			skState:    1,
+			tcpFlags:   "ACK",
+			caState:    1,
+			wantPhase:  RetransPhaseData,
+			wantReason: RetransReasonUnknown,
 		},
 
 		// === Reorder-prone fast retransmit ===
@@ -212,7 +169,7 @@ func TestClassifyRetrans(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			gotPhase, gotReason := ClassifyRetrans(tt.skState, tt.tcpFlags, tt.caState, tt.icskPending, tt.reordSeen, tt.dsackDups)
+			gotPhase, gotReason := ClassifyRetrans(tt.skState, tt.tcpFlags, tt.caState, tt.reordSeen, tt.dsackDups)
 			if gotPhase != tt.wantPhase {
 				t.Errorf("phase: got %v, want %v", gotPhase, tt.wantPhase)
 			}
@@ -232,8 +189,8 @@ func TestPhaseAndReasonStrings(t *testing.T) {
 		}
 	}
 
-	reasons := []RetransReason{RetransReasonRTO, RetransReasonFast, RetransReasonReorderProneFast, RetransReasonTLP, RetransReasonSpurious, RetransReasonUnknown, RetransReason(99)}
-	wantReasonStrs := []string{"RTO", "fast_retransmit", "reorder_prone_fast", "TLP", "spurious", "unknown", "unknown"}
+	reasons := []RetransReason{RetransReasonRTO, RetransReasonFast, RetransReasonReorderProneFast, RetransReasonSpurious, RetransReasonUnknown, RetransReason(99)}
+	wantReasonStrs := []string{"RTO", "fast_retransmit", "reorder_prone_fast", "spurious", "unknown", "unknown"}
 	for i, r := range reasons {
 		if s := r.String(); s != wantReasonStrs[i] {
 			t.Errorf("reason %d: got %q, want %q", r, s, wantReasonStrs[i])
@@ -274,7 +231,7 @@ func TestClassifyRetransAllStates(t *testing.T) {
 	for state := uint8(1); state <= 12; state++ {
 		state := state
 		t.Run(fmt.Sprintf("state=%s(%d)", stateNames[state], state), func(t *testing.T) {
-			phase, _ := ClassifyRetrans(state, "ACK", 0, 0, 0, 0)
+			phase, _ := ClassifyRetrans(state, "ACK", 0, 0, 0)
 
 			if connectStates[state] && phase != RetransPhaseConnect {
 				t.Errorf("state %s(%d): expected Connect phase, got %v", stateNames[state], state, phase)

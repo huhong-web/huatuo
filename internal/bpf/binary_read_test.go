@@ -48,7 +48,9 @@ type retransEvent struct {
 	TCPSeq          uint32
 	TCPAck          uint32
 	Comm            [TaskCommLen]byte
-	TailPad         [8]byte
+	TCPEndSeq       uint32
+	TCPFlags        uint8
+	TailPad         [3]byte
 }
 
 const retransEventSize = 144
@@ -77,13 +79,15 @@ func TestRetransEventBinaryLayout(t *testing.T) {
 	raw[95] = 3
 	raw[96] = 1
 	binary.NativeEndian.PutUint16(raw[98:], 0)
-	raw[100] = 5
+	raw[100] = 6
 	binary.NativeEndian.PutUint32(raw[104:], 10)
 	binary.NativeEndian.PutUint32(raw[108:], 5)
 	binary.NativeEndian.PutUint32(raw[112:], 123456)
 	binary.NativeEndian.PutUint32(raw[116:], 789012)
 	copy(raw[120:136], "testcmd\x00")
-	copy(raw[136:144], []byte{0xce, 0xfa, 0xed, 0xfe, 0x01, 0x02, 0x03, 0x04})
+	binary.NativeEndian.PutUint32(raw[136:], 123999)
+	raw[140] = 0x11
+	copy(raw[141:144], []byte{0x01, 0x02, 0x03})
 
 	want := retransEvent{
 		KtimeNS:         12345,
@@ -103,12 +107,14 @@ func TestRetransEventBinaryLayout(t *testing.T) {
 		CaState:         4,
 		IcskRetransmits: 3,
 		EventType:       1,
-		IcskPending:     5,
+		IcskPending:     6,
 		ReordSeen:       10,
 		DsackDups:       5,
 		TCPSeq:          123456,
 		TCPAck:          789012,
-		TailPad:         [8]byte{0xce, 0xfa, 0xed, 0xfe, 0x01, 0x02, 0x03, 0x04},
+		TCPEndSeq:       123999,
+		TCPFlags:        0x11,
+		TailPad:         [3]byte{0x01, 0x02, 0x03},
 	}
 	copy(want.Comm[:], "testcmd\x00")
 

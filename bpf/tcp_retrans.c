@@ -11,13 +11,11 @@
 #include "bpf_cgroup.h"
 #include "bpf_net_namespace.h"
 #include "bpf_pcap_stub.h"
-#include "bpf_skb.h"
 #include "bpf_tcp_reorder.h"
 #include "vmlinux_net.h"
 
 #define RETRANS_EVENT_SKB    1
 #define RETRANS_EVENT_SYNACK 2
-#define RETRANS_EVENT_TLP    3
 
 #define TCP_NEW_SYN_RECV 12
 
@@ -48,7 +46,9 @@ struct retrans_event {
 	u32 tcp_seq;
 	u32 tcp_ack;
 	u8  comm[COMPAT_TASK_COMM_LEN];
-	u8  _tail_pad[8];
+	u32 tcp_end_seq;
+	u8  tcp_flags;
+	u8  _tail_pad[3];
 };
 
 struct {
@@ -135,6 +135,18 @@ static __always_inline void fill_addrs_v6_from_req(struct retrans_event *ev,
 	__builtin_memcpy(ev->daddr_v6, &dst, sizeof(dst));
 }
 
+static __always_inline void fill_addrs_from_req(struct retrans_event *ev,
+						 struct request_sock *req)
+{
+	if (!req)
+		return;
+
+	if (ev->family == AF_INET)
+		fill_addrs_v4_from_req(ev, req);
+	else if (ev->family == AF_INET6)
+		fill_addrs_v6_from_req(ev, req);
+}
+
 static __always_inline void read_icsk_pending(struct sock *sk, struct retrans_event *ev)
 {
 	if (!sk)
@@ -144,21 +156,6 @@ static __always_inline void read_icsk_pending(struct sock *sk, struct retrans_ev
 
 	if (bpf_core_field_exists(icsk->icsk_pending))
 		ev->icsk_pending = BPF_CORE_READ(icsk, icsk_pending);
-}
-
-/* Read snd_nxt / snd_una from tcp_sock.  Used when no skb is available
- * (TLP): snd_nxt is the next sequence number to send (closest approximation
- * of the probe seq), snd_una is the unacknowledged sequence number. */
-static __always_inline void read_snd_nxt_una_from_sk(struct sock *sk,
-						      struct retrans_event *ev)
-{
-	struct tcp_sock *tp = (struct tcp_sock *)sk;
-
-	if (bpf_core_field_exists(((struct tcp_sock *)0)->snd_nxt))
-		ev->tcp_seq = BPF_CORE_READ(tp, snd_nxt);
-
-	if (bpf_core_field_exists(((struct tcp_sock *)0)->snd_una))
-		ev->tcp_ack = BPF_CORE_READ(tp, snd_una);
 }
 
 static __always_inline void fill_retrans_event_from_sk(struct retrans_event *ev,
@@ -193,6 +190,27 @@ static __always_inline void fill_retrans_event_from_sk(struct retrans_event *ev,
 		fill_addrs_v6_from_sk(ev, sk);
 }
 
+static __always_inline void read_retransmit_skb_tcp_info(struct retrans_event *ev,
+							  struct sock *sk,
+							  struct sk_buff *skb)
+{
+	if (skb) {
+		struct tcp_skb_cb *tcb =
+			(struct tcp_skb_cb *)((void *)skb +
+				bpf_core_field_offset(struct sk_buff, cb));
+
+		if (bpf_core_field_exists(((struct tcp_skb_cb *)0)->seq))
+			ev->tcp_seq = BPF_CORE_READ(tcb, seq);
+		if (bpf_core_field_exists(((struct tcp_skb_cb *)0)->end_seq))
+			ev->tcp_end_seq = BPF_CORE_READ(tcb, end_seq);
+		if (bpf_core_field_exists(((struct tcp_skb_cb *)0)->tcp_flags))
+			ev->tcp_flags = BPF_CORE_READ(tcb, tcp_flags);
+	}
+
+	if (sk && bpf_core_field_exists(((struct tcp_sock *)0)->rcv_nxt))
+		ev->tcp_ack = BPF_CORE_READ((struct tcp_sock *)sk, rcv_nxt);
+}
+
 struct tcp_retransmit_skb_ctx {
 	unsigned short common_type;
 	unsigned char common_flags;
@@ -223,30 +241,14 @@ int tcp_retransmit_skb_prog(struct tcp_retransmit_skb_ctx *ctx)
 	ev.skb_addr = (u64)(unsigned long)skb;
 	fill_retrans_event_from_sk(&ev, sk);
 
-	/* For a retransmitted segment these are the exact sequence and
-	 * acknowledgement numbers from the TCP header. */
-	struct tcphdr tcp_hdr = {};
-	if (skb_read_tcp_header(skb, &tcp_hdr)) {
-		ev.tcp_seq = bpf_ntohl(tcp_hdr.seq);
-		ev.tcp_ack = bpf_ntohl(tcp_hdr.ack_seq);
-	}
+	read_retransmit_skb_tcp_info(&ev, sk, skb);
 
 	bpf_perf_event_output(ctx, &perf_events, COMPAT_BPF_F_CURRENT_CPU, &ev, sizeof(ev));
 	return 0;
 }
 
-struct tcp_retransmit_synack_ctx {
-	unsigned short common_type;
-	unsigned char common_flags;
-	unsigned char common_preempt_count;
-	int common_pid;
-
-	const void *skaddr;
-	const void *req;
-};
-
 SEC("tracepoint/tcp/tcp_retransmit_synack")
-int tcp_retransmit_synack_prog(struct tcp_retransmit_synack_ctx *ctx)
+int tcp_retransmit_synack_prog(struct trace_event_raw_tcp_retransmit_synack *ctx)
 {
 	struct retrans_event ev = {};
 
@@ -278,34 +280,7 @@ int tcp_retransmit_synack_prog(struct tcp_retransmit_synack_ctx *ctx)
 	ev.skb_addr = 0;
 	ev.ca_state = 0;
 
-	if (ev.family == AF_INET) {
-		fill_addrs_v4_from_req(&ev, req);
-	} else if (ev.family == AF_INET6) {
-		fill_addrs_v6_from_req(&ev, req);
-	}
-
-	bpf_perf_event_output(ctx, &perf_events, COMPAT_BPF_F_CURRENT_CPU, &ev, sizeof(ev));
-	return 0;
-}
-
-SEC("kprobe/tcp_send_loss_probe")
-int tcp_send_loss_probe_kprobe(struct pt_regs *ctx)
-{
-	struct retrans_event ev = {};
-
-	ev.event_type = RETRANS_EVENT_TLP;
-	ev.ktime_ns = bpf_ktime_get_ns();
-	ev.tgid_pid = bpf_get_current_pid_tgid();
-	bpf_get_current_comm(&ev.comm, sizeof(ev.comm));
-
-	struct sock *sk = (struct sock *)PT_REGS_PARM1_CORE(ctx);
-	if (!sk)
-		return 0;
-
-	ev.skb_addr = 0;
-	fill_retrans_event_from_sk(&ev, sk);
-
-	read_snd_nxt_una_from_sk(sk, &ev);
+	fill_addrs_from_req(&ev, req);
 
 	bpf_perf_event_output(ctx, &perf_events, COMPAT_BPF_F_CURRENT_CPU, &ev, sizeof(ev));
 	return 0;

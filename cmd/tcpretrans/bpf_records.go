@@ -23,7 +23,6 @@ import (
 const (
 	retransEventSKU    = 1
 	retransEventSynack = 2
-	retransEventTLP    = 3
 )
 
 type retransEvent struct {
@@ -53,7 +52,9 @@ type retransEvent struct {
 	TCPSeq          uint32
 	TCPAck          uint32
 	Comm            [bpf.TaskCommLen]byte
-	TailPad         [8]byte
+	TCPEndSeq       uint32
+	TCPFlags        uint8
+	TailPad         [3]byte
 }
 
 var _ = [1]struct{}{}[144-unsafe.Sizeof(retransEvent{})]

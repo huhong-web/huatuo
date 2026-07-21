@@ -55,8 +55,15 @@ func (s *textWriter) Write(ev *types.TCPRetransTracing) error {
 	if ev.SkbAddr != "" {
 		detail += " skb=" + ev.SkbAddr
 	}
-	if ev.TCPSeq != 0 || ev.TCPAck != 0 {
-		detail += fmt.Sprintf(" seq=%d ack=%d", ev.TCPSeq, ev.TCPAck)
+	if ev.TCPSeq != 0 || ev.TCPEndSeq != 0 || ev.TCPAck != 0 {
+		detail += fmt.Sprintf(" seq=%d", ev.TCPSeq)
+		if ev.TCPEndSeq != 0 {
+			detail += fmt.Sprintf(" end=%d", ev.TCPEndSeq)
+		}
+		detail += fmt.Sprintf(" ack=%d", ev.TCPAck)
+	}
+	if ev.TCPFlags != 0 {
+		detail += fmt.Sprintf(" flags=0x%02x", ev.TCPFlags)
 	}
 	_, err := fmt.Fprintf(
 		s.w,
@@ -138,8 +145,6 @@ func formatEvent(ev *retransEvent) *types.TCPRetransTracing {
 		eventTypeStr = "tcp_retransmit_skb"
 	case retransEventSynack:
 		eventTypeStr = "tcp_retransmit_synack"
-	case retransEventTLP:
-		eventTypeStr = "tcp_send_loss_probe"
 	}
 
 	return &types.TCPRetransTracing{
@@ -165,6 +170,8 @@ func formatEvent(ev *retransEvent) *types.TCPRetransTracing {
 		DsackDups:          ev.DsackDups,
 		TCPSeq:             ev.TCPSeq,
 		TCPAck:             ev.TCPAck,
+		TCPEndSeq:          ev.TCPEndSeq,
+		TCPFlags:           ev.TCPFlags,
 		SkbAddr:            kernaddr.Format(ev.SkbAddr),
 	}
 }
@@ -173,14 +180,11 @@ func classifyEvent(ev *retransEvent) (packet.RetransPhase, packet.RetransReason)
 	switch ev.EventType {
 	case retransEventSynack:
 		return packet.RetransPhaseConnect, packet.RetransReasonRTO
-	case retransEventTLP:
-		return packet.RetransPhaseData, packet.RetransReasonTLP
 	default:
 		return packet.ClassifyRetrans(
 			uint8(ev.State),
 			"",
 			ev.CaState,
-			ev.IcskPending,
 			ev.ReordSeen,
 			ev.DsackDups,
 		)

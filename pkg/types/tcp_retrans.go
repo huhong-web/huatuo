@@ -44,25 +44,28 @@ type TCPRetransTracing struct {
 
 	// Phase / Reason classification
 	Phase  string `json:"phase"`  // "connect", "data", "close"
-	Reason string `json:"reason"` // "RTO", "fast_retransmit", "reorder_prone_fast", "TLP", "spurious", "unknown"
+	Reason string `json:"reason"` // "RTO", "fast_retransmit", "reorder_prone_fast", "spurious", "unknown"
 
 	// Event discriminator
-	EventType string `json:"event_type"` // "tcp_retransmit_skb", "tcp_retransmit_synack", or "tcp_send_loss_probe"
+	EventType string `json:"event_type"` // "tcp_retransmit_skb" or "tcp_retransmit_synack"
 
 	// Congestion control state (raw BPF fields)
 	CaState         uint8 `json:"ca_state"`         // icsk_ca_state: 0=Open, 3=Recovery, 4=Loss
 	IcskRetransmits uint8 `json:"icsk_retransmits"` // current retrans counter for the connection
-	IcskPending     uint8 `json:"icsk_pending"`     // icsk_pending: 0=none, 1=RETRANS, 5=LOSS_PROBE, 6=REO_TIMEOUT
+	IcskPending     uint8 `json:"icsk_pending"`     // raw inet_connection_sock timer state
 
 	ReordSeen uint32 `json:"reord_seen,omitempty"` // tp->reord_seen (cumulative)
 	DsackDups uint32 `json:"dsack_dups,omitempty"` // tp->dsack_dups (cumulative)
 
 	// TCP sequence numbers.
-	// For tcp_retransmit_skb: actual seq/ack from the retransmitted segment's TCP header.
-	// For tcp_send_loss_probe: snd_nxt/snd_una from tcp_sock (no skb available).
+	// For tcp_retransmit_skb, tcp_seq/tcp_end_seq/tcp_flags come from
+	// TCP_SKB_CB(skb), and tcp_ack comes from tcp_sk(sk)->rcv_nxt. The skb in
+	// tcp_retransmit_skb is headerless, so tcphdr.seq/ack_seq are not reliable.
 	// For tcp_retransmit_synack: 0 (not meaningful).
-	TCPSeq uint32 `json:"tcp_seq,omitempty"`
-	TCPAck uint32 `json:"tcp_ack,omitempty"`
+	TCPSeq    uint32 `json:"tcp_seq"`
+	TCPAck    uint32 `json:"tcp_ack"`
+	TCPEndSeq uint32 `json:"tcp_end_seq,omitempty"`
+	TCPFlags  uint8  `json:"tcp_flags,omitempty"`
 
 	// Kernel internals
 	SkbAddr string `json:"skb_addr,omitempty"` // the sk_buff pointer being retransmitted

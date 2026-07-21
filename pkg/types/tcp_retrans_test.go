@@ -43,16 +43,18 @@ func TestTCPRetransTracingRoundTrip(t *testing.T) {
 				Family:             2,
 				State:              "ESTABLISHED",
 				Phase:              "data",
-				Reason:             "TLP",
-				EventType:          "tcp_send_loss_probe",
-				CaState:            0,
+				Reason:             "reorder_prone_fast",
+				EventType:          "tcp_retransmit_skb",
+				CaState:            3,
 				IcskRetransmits:    0,
-				IcskPending:        5,
+				IcskPending:        6,
 				ReordSeen:          10,
 				DsackDups:          2,
 				TCPSeq:             123456,
 				TCPAck:             789012,
-				SkbAddr:            "",
+				TCPEndSeq:          123999,
+				TCPFlags:           0x11,
+				SkbAddr:            "0xffff888012345678",
 				DropLocation:       "network_or_host_hardware",
 				Source:             "events",
 			},
@@ -134,7 +136,7 @@ func TestTCPRetransTracingOmitEmpty(t *testing.T) {
 
 	omitFields := []string{
 		"container_id", "memcg_css", "net_namespace_cookie", "net_namespace_inode",
-		"reord_seen", "dsack_dups", "tcp_seq", "tcp_ack",
+		"reord_seen", "dsack_dups", "tcp_end_seq", "tcp_flags",
 		"skb_addr", "drop_location", "source",
 	}
 	for _, f := range omitFields {

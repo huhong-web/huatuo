@@ -45,7 +45,6 @@ const (
 	RetransReasonRTO              RetransReason = iota // RTO timeout — worst case, cwnd collapses
 	RetransReasonFast                                  // Fast retransmit (dupACK/SACK/RACK), cwnd halves
 	RetransReasonReorderProneFast                      // Fast retransmit on a flow with prior reorder history
-	RetransReasonTLP                                   // Tail Loss Probe
 	RetransReasonSpurious                              // DSACK-verified unnecessary retrans (Layer 1)
 	RetransReasonUnknown                               // insufficient data to determine
 )
@@ -58,8 +57,6 @@ func (r RetransReason) String() string {
 		return "fast_retransmit"
 	case RetransReasonReorderProneFast:
 		return "reorder_prone_fast"
-	case RetransReasonTLP:
-		return "TLP"
 	case RetransReasonSpurious:
 		return "spurious"
 	default:
@@ -67,31 +64,20 @@ func (r RetransReason) String() string {
 	}
 }
 
-// ICSK_TIME_* constants (stable since 4.x, #define in inet_connection_sock.h:145-150).
-const (
-	ICSKTimeRetrans    uint8 = 1 // ICSK_TIME_RETRANS
-	ICSKTimeProbe0     uint8 = 3 // ICSK_TIME_PROBE0
-	ICSKTimeLossProbe  uint8 = 5 // ICSK_TIME_LOSS_PROBE
-	ICSKTimeReoTimeout uint8 = 6 // ICSK_TIME_REO_TIMEOUT
-)
-
 // ClassifyRetrans determines the phase and reason for a TCP retransmission
-// using the classification tree from ca_state + icsk_pending.
+// using the classification tree from ca_state.
 //
 // Classification tree:
 //
-//	ca_state=Loss(4)    && pending==0    → RTO (普通 RTO 重传)
-//	ca_state=Loss(4)    && pending!=0    → RTO (RTO 恢复期补发)
-//	ca_state=Recovery(3)&& pending==6    → fast_retransmit (RACK reo timer)
-//	ca_state=Recovery(3)&& pending!=6    → fast_retransmit (dup ACK/SACK)
-//	ca_state<=2         && pending==5    → TLP (尾丢包探测)
-//	ca_state<=2         && pending!=5    → unknown (TSQ 边角)
+//	ca_state=Loss(4)     → RTO (普通 RTO 重传)
+//	ca_state=Recovery(3) → fast_retransmit (dup ACK/SACK/RACK)
+//	ca_state<=2          → unknown (TSQ 边角)
 //
 // Phase is derived from sk_state. Reorder history is used to distinguish
 // ReorderProneFast from Fast when ca_state=Recovery.
-func ClassifyRetrans(skStateNum uint8, tcpFlags string, caState, icskPending uint8, reordSeen, dsackDups uint32) (RetransPhase, RetransReason) {
+func ClassifyRetrans(skStateNum uint8, tcpFlags string, caState uint8, reordSeen, dsackDups uint32) (RetransPhase, RetransReason) {
 	phase := phaseFromState(skStateNum, tcpFlags)
-	reason := reasonFromTree(caState, icskPending, reordSeen, dsackDups, phase)
+	reason := reasonFromTree(caState, reordSeen, dsackDups, phase)
 	return phase, reason
 }
 
@@ -112,7 +98,7 @@ func phaseFromState(skStateNum uint8, tcpFlags string) RetransPhase {
 	}
 }
 
-func reasonFromTree(caState, icskPending uint8, reordSeen, dsackDups uint32, phase RetransPhase) RetransReason {
+func reasonFromTree(caState uint8, reordSeen, dsackDups uint32, phase RetransPhase) RetransReason {
 	switch caState {
 	case 4: // TCP_CA_Loss
 		return RetransReasonRTO
@@ -122,9 +108,6 @@ func reasonFromTree(caState, icskPending uint8, reordSeen, dsackDups uint32, pha
 		}
 		return RetransReasonFast
 	default: // ca_state 0-2 (Open, Disorder, CWR)
-		if icskPending == ICSKTimeLossProbe {
-			return RetransReasonTLP
-		}
 		return reasonFromFlagsAndPhase("", phase)
 	}
 }
