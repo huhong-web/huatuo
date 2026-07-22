@@ -58,16 +58,15 @@ type TCPRetransTracing struct {
 	DsackDups uint32 `json:"dsack_dups,omitempty"` // tp->dsack_dups (cumulative)
 
 	// TCP sequence numbers.
-	// For tcp_retransmit_skb, tcp_seq/tcp_end_seq/tcp_flags_raw come from
+	// For tcp_retransmit_skb, tcp_seq/tcp_end_seq come from
 	// TCP_SKB_CB(skb), and tcp_ack comes from tcp_sk(sk)->rcv_nxt. The skb in
 	// tcp_retransmit_skb is headerless, so tcphdr.seq/ack_seq are not reliable.
 	// tcp_flags is the rendered TCP flag set, e.g. "ACK|PSH".
 	// For tcp_retransmit_synack, tcp_flags is derived from the event type.
-	TCPSeq      uint32 `json:"tcp_seq"`
-	TCPAck      uint32 `json:"tcp_ack"`
-	TCPEndSeq   uint32 `json:"tcp_end_seq,omitempty"`
-	TCPFlags    string `json:"tcp_flags,omitempty"`
-	TCPFlagsRaw uint8  `json:"tcp_flags_raw,omitempty"`
+	TCPSeq    uint32 `json:"tcp_seq"`
+	TCPAck    uint32 `json:"tcp_ack"`
+	TCPEndSeq uint32 `json:"tcp_end_seq,omitempty"`
+	TCPFlags  string `json:"tcp_flags,omitempty"`
 
 	// Kernel internals
 	SkbAddr string `json:"skb_addr,omitempty"` // the sk_buff pointer being retransmitted

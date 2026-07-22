@@ -65,7 +65,7 @@ func (s *textWriter) Write(ev *types.TCPRetransTracing) error {
 		detail += fmt.Sprintf(" ack=%d", ev.TCPAck)
 	}
 	if ev.TCPFlags != "" {
-		detail += fmt.Sprintf(" flags=%s", ev.TCPFlags)
+		detail += " flags=" + ev.TCPFlags
 	}
 	_, err := fmt.Fprintf(
 		s.w,
@@ -179,7 +179,6 @@ func formatEvent(ev *retransEvent) *types.TCPRetransTracing {
 		TCPAck:             ev.TCPAck,
 		TCPEndSeq:          ev.TCPEndSeq,
 		TCPFlags:           tcpFlags,
-		TCPFlagsRaw:        tcpFlagsRaw,
 		SkbAddr:            kernaddr.Format(ev.SkbAddr),
 	}
 }

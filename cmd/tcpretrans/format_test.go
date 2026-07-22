@@ -83,10 +83,9 @@ func TestFormatEventTCPFlags(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
-		name      string
-		ev        *retransEvent
-		wantFlags string
-		wantRaw   uint8
+		name string
+		ev   *retransEvent
+		want string
 	}{
 		{
 			name: "skb flags",
@@ -94,16 +93,14 @@ func TestFormatEventTCPFlags(t *testing.T) {
 				EventType: retransEventSKU,
 				TCPFlags:  0x18,
 			},
-			wantFlags: "ACK|PSH",
-			wantRaw:   0x18,
+			want: "ACK|PSH",
 		},
 		{
 			name: "synack flags derived from event type",
 			ev: &retransEvent{
 				EventType: retransEventSynack,
 			},
-			wantFlags: "SYN|ACK",
-			wantRaw:   tcpFlagsSynAck,
+			want: "SYN|ACK",
 		},
 	}
 
@@ -112,11 +109,8 @@ func TestFormatEventTCPFlags(t *testing.T) {
 			t.Parallel()
 
 			event := formatEvent(tt.ev)
-			if event.TCPFlags != tt.wantFlags {
-				t.Fatalf("TCPFlags = %q, want %q", event.TCPFlags, tt.wantFlags)
-			}
-			if event.TCPFlagsRaw != tt.wantRaw {
-				t.Fatalf("TCPFlagsRaw = 0x%02x, want 0x%02x", event.TCPFlagsRaw, tt.wantRaw)
+			if event.TCPFlags != tt.want {
+				t.Fatalf("TCPFlags = %q, want %q", event.TCPFlags, tt.want)
 			}
 
 			encoded, err := json.Marshal(event)
@@ -127,8 +121,8 @@ func TestFormatEventTCPFlags(t *testing.T) {
 			if err := json.Unmarshal(encoded, &fields); err != nil {
 				t.Fatalf("Unmarshal: %v", err)
 			}
-			if got := fields["tcp_flags"]; got != tt.wantFlags {
-				t.Fatalf("tcp_flags = %v, want %q", got, tt.wantFlags)
+			if got := fields["tcp_flags"]; got != tt.want {
+				t.Fatalf("tcp_flags = %v, want %q", got, tt.want)
 			}
 		})
 	}
@@ -137,18 +131,44 @@ func TestFormatEventTCPFlags(t *testing.T) {
 func TestTextWriterFormatsTCPFlags(t *testing.T) {
 	t.Parallel()
 
-	var buf bytes.Buffer
-	w := &textWriter{w: &buf}
-
-	err := w.Write(&types.TCPRetransTracing{
-		ObservedTimestamp: "now",
-		TCPFlags:          "ACK|PSH",
-	})
-	if err != nil {
-		t.Fatalf("Write: %v", err)
+	tests := []struct {
+		name string
+		ev   *types.TCPRetransTracing
+		want string
+	}{
+		{
+			name: "skb flags",
+			ev: &types.TCPRetransTracing{
+				ObservedTimestamp: "now",
+				TCPFlags:          "ACK|PSH",
+			},
+			want: " flags=ACK|PSH ",
+		},
+		{
+			name: "synack flags",
+			ev: &types.TCPRetransTracing{
+				ObservedTimestamp: "now",
+				EventType:         "tcp_retransmit_synack",
+				TCPFlags:          "SYN|ACK",
+			},
+			want: " flags=SYN|ACK ",
+		},
 	}
-	if got := buf.String(); !strings.Contains(got, " flags=ACK|PSH ") {
-		t.Fatalf("output = %q, want rendered TCP flags", got)
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			var buf bytes.Buffer
+			w := &textWriter{w: &buf}
+
+			if err := w.Write(tt.ev); err != nil {
+				t.Fatalf("Write: %v", err)
+			}
+			if got := buf.String(); !strings.Contains(got, tt.want) {
+				t.Fatalf("output = %q, want rendered TCP flags %q", got, tt.want)
+			}
+		})
 	}
 }
 
