@@ -19,6 +19,13 @@
 
 #define TCP_NEW_SYN_RECV 12
 
+#ifndef bpf_core_field_offset
+#define compat_bpf_core_field_offset(field) \
+	__builtin_preserve_field_info(field, BPF_FIELD_BYTE_OFFSET)
+#else
+#define compat_bpf_core_field_offset(field) bpf_core_field_offset(field)
+#endif
+
 struct retrans_event {
 	u64 ktime_ns;
 	u64 tgid_pid;
@@ -197,7 +204,7 @@ static __always_inline void read_retransmit_skb_tcp_info(struct retrans_event *e
 	if (skb) {
 		struct tcp_skb_cb *tcb =
 			(struct tcp_skb_cb *)((void *)skb +
-				bpf_core_field_offset(struct sk_buff, cb));
+				compat_bpf_core_field_offset(((struct sk_buff *)0)->cb));
 
 		if (bpf_core_field_exists(((struct tcp_skb_cb *)0)->seq))
 			ev->tcp_seq = BPF_CORE_READ(tcb, seq);
