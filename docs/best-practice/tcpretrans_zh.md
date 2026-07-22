@@ -176,7 +176,8 @@ sudo tcpretrans --bpf-path bpf/tcp_retrans.o \
 | `tcp_seq` | uint32 | SKB 事件中 `TCP_SKB_CB(skb)->seq`，即重传段起始序列号；SYN-ACK 事件中为零。 |
 | `tcp_ack` | uint32 | SKB 事件中 `tcp_sk(sk)->rcv_nxt`，即实际重传包 TCP 头会携带的 ACK 序号；SYN-ACK 事件中为零。 |
 | `tcp_end_seq` | uint32 | SKB 事件中 `TCP_SKB_CB(skb)->end_seq`，即重传段结束序列号；SYN-ACK 事件中省略。 |
-| `tcp_flags` | uint8 | SKB 事件中 `TCP_SKB_CB(skb)->tcp_flags` 的原始 TCP flag 位；SYN-ACK 事件中省略。 |
+| `tcp_flags` | string | 渲染后的 TCP flag 集合，如 `SYN|ACK`、`ACK|PSH`；SKB 事件来自 `TCP_SKB_CB(skb)->tcp_flags`，SYN-ACK 事件由事件类型派生。 |
+| `tcp_flags_raw` | uint8 | TCP flag 原始位图；SKB 事件来自 `TCP_SKB_CB(skb)->tcp_flags`，SYN-ACK 事件为 `SYN|ACK` 对应的位图。 |
 | `skb_addr` | string | 十六进制重传队列 SKB 指针；SYN-ACK 事件中不存在。 |
 | `drop_location` | string | huatuo-bamai 生成的丢包关联启发式结果，见 §7。 |
 | `source` | string | 可选来源字段；独立 CLI 当前不设置该字段。 |
@@ -184,13 +185,13 @@ sudo tcpretrans --bpf-path bpf/tcp_retrans.o \
 ### 文本输出格式
 
 ```
-<timestamp> [<phase>/<reason>] <saddr>:<sport> > <daddr>:<dport> state=<STATE> [SYNACK] [skb=<addr>] [seq=<N> [end=<N>] ack=<N>] [flags=0xNN] pid=<N>[<comm>] ca=<N> retrans=<N>
+<timestamp> [<phase>/<reason>] <saddr>:<sport> > <daddr>:<dport> state=<STATE> [SYNACK] [skb=<addr>] [seq=<N> [end=<N>] ack=<N>] [flags=<FLAGS>] pid=<N>[<comm>] ca=<N> retrans=<N>
 ```
 
 示例：
 
 ```
-2026-07-08T09:19:52.042Z [data/RTO] 10.0.0.1:443 > 10.0.0.2:58244 state=ESTABLISHED skb=0xffff888012345678 seq=123456 end=124916 ack=789012 flags=0x10 pid=0[swapper/0] ca=4 retrans=3
+2026-07-08T09:19:52.042Z [data/RTO] 10.0.0.1:443 > 10.0.0.2:58244 state=ESTABLISHED skb=0xffff888012345678 seq=123456 end=124916 ack=789012 flags=ACK pid=0[swapper/0] ca=4 retrans=3
 ```
 
 示例中的 `pid` 和 `comm` 表示 hook 运行时的执行上下文；工作负载归属应使用

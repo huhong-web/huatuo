@@ -31,6 +31,8 @@ import (
 	"huatuo-bamai/pkg/types"
 )
 
+const tcpFlagsSynAck uint8 = 0x12 // SYN(0x02) | ACK(0x10)
+
 // writer is the single write destination for a tcpretrans session.
 type writer interface {
 	Write(ev *types.TCPRetransTracing) error
@@ -62,8 +64,8 @@ func (s *textWriter) Write(ev *types.TCPRetransTracing) error {
 		}
 		detail += fmt.Sprintf(" ack=%d", ev.TCPAck)
 	}
-	if ev.TCPFlags != 0 {
-		detail += fmt.Sprintf(" flags=0x%02x", ev.TCPFlags)
+	if ev.TCPFlags != "" {
+		detail += fmt.Sprintf(" flags=%s", ev.TCPFlags)
 	}
 	_, err := fmt.Fprintf(
 		s.w,
@@ -127,7 +129,12 @@ func newWriter(opt *writerOption) (writer, func(), error) {
 }
 
 func formatEvent(ev *retransEvent) *types.TCPRetransTracing {
-	phase, reason := classifyEvent(ev)
+	tcpFlagsRaw := ev.TCPFlags
+	if ev.EventType == retransEventSynack {
+		tcpFlagsRaw = tcpFlagsSynAck
+	}
+	tcpFlags := packet.FormatTCPFlags(tcpFlagsRaw)
+	phase, reason := classifyEvent(ev, tcpFlags)
 
 	var saddr, daddr string
 	switch ev.Family {
@@ -171,19 +178,20 @@ func formatEvent(ev *retransEvent) *types.TCPRetransTracing {
 		TCPSeq:             ev.TCPSeq,
 		TCPAck:             ev.TCPAck,
 		TCPEndSeq:          ev.TCPEndSeq,
-		TCPFlags:           ev.TCPFlags,
+		TCPFlags:           tcpFlags,
+		TCPFlagsRaw:        tcpFlagsRaw,
 		SkbAddr:            kernaddr.Format(ev.SkbAddr),
 	}
 }
 
-func classifyEvent(ev *retransEvent) (packet.RetransPhase, packet.RetransReason) {
+func classifyEvent(ev *retransEvent, tcpFlags string) (packet.RetransPhase, packet.RetransReason) {
 	switch ev.EventType {
 	case retransEventSynack:
 		return packet.RetransPhaseConnect, packet.RetransReasonRTO
 	default:
 		return packet.ClassifyRetrans(
 			uint8(ev.State),
-			"",
+			tcpFlags,
 			ev.CaState,
 			ev.ReordSeen,
 			ev.DsackDups,

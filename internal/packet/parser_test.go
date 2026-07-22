@@ -120,6 +120,57 @@ func TestParseIPv4TCP(t *testing.T) {
 	}
 }
 
+func TestFormatTCPFlags(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name  string
+		flags uint8
+		want  string
+	}{
+		{
+			name:  "none",
+			flags: 0,
+			want:  "",
+		},
+		{
+			name:  "syn",
+			flags: 0x02,
+			want:  "SYN",
+		},
+		{
+			name:  "syn ack",
+			flags: 0x12,
+			want:  "SYN|ACK",
+		},
+		{
+			name:  "ack psh",
+			flags: 0x18,
+			want:  "ACK|PSH",
+		},
+		{
+			name:  "fin ack",
+			flags: 0x11,
+			want:  "ACK|FIN",
+		},
+		{
+			name:  "all",
+			flags: 0xff,
+			want:  "SYN|ACK|FIN|RST|PSH|URG|ECE|CWR",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			if got := FormatTCPFlags(tt.flags); got != tt.want {
+				t.Errorf("FormatTCPFlags(0x%02x) = %q, want %q", tt.flags, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestParseIPv4UDP(t *testing.T) {
 	pkt := Hdr{EthProto: 0x0800, RawLen: 28}       // 20 IPv4 + 8 UDP
 	pkt.Raw[0] = 0x45                              // version=4, ihl=5

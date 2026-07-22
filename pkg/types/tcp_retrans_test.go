@@ -53,7 +53,8 @@ func TestTCPRetransTracingRoundTrip(t *testing.T) {
 				TCPSeq:             123456,
 				TCPAck:             789012,
 				TCPEndSeq:          123999,
-				TCPFlags:           0x11,
+				TCPFlags:           "ACK|FIN",
+				TCPFlagsRaw:        0x11,
 				SkbAddr:            "0xffff888012345678",
 				DropLocation:       "network_or_host_hardware",
 				Source:             "events",
@@ -136,7 +137,7 @@ func TestTCPRetransTracingOmitEmpty(t *testing.T) {
 
 	omitFields := []string{
 		"container_id", "memcg_css", "net_namespace_cookie", "net_namespace_inode",
-		"reord_seen", "dsack_dups", "tcp_end_seq", "tcp_flags",
+		"reord_seen", "dsack_dups", "tcp_end_seq", "tcp_flags", "tcp_flags_raw",
 		"skb_addr", "drop_location", "source",
 	}
 	for _, f := range omitFields {

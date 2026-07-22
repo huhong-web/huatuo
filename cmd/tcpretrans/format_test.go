@@ -15,8 +15,10 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 
 	"huatuo-bamai/pkg/types"
@@ -74,6 +76,79 @@ func TestFormatEventSkbAddr(t *testing.T) {
 				t.Fatalf("skb_addr = %v, want %q", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestFormatEventTCPFlags(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name      string
+		ev        *retransEvent
+		wantFlags string
+		wantRaw   uint8
+	}{
+		{
+			name: "skb flags",
+			ev: &retransEvent{
+				EventType: retransEventSKU,
+				TCPFlags:  0x18,
+			},
+			wantFlags: "ACK|PSH",
+			wantRaw:   0x18,
+		},
+		{
+			name: "synack flags derived from event type",
+			ev: &retransEvent{
+				EventType: retransEventSynack,
+			},
+			wantFlags: "SYN|ACK",
+			wantRaw:   tcpFlagsSynAck,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			event := formatEvent(tt.ev)
+			if event.TCPFlags != tt.wantFlags {
+				t.Fatalf("TCPFlags = %q, want %q", event.TCPFlags, tt.wantFlags)
+			}
+			if event.TCPFlagsRaw != tt.wantRaw {
+				t.Fatalf("TCPFlagsRaw = 0x%02x, want 0x%02x", event.TCPFlagsRaw, tt.wantRaw)
+			}
+
+			encoded, err := json.Marshal(event)
+			if err != nil {
+				t.Fatalf("Marshal: %v", err)
+			}
+			fields := map[string]any{}
+			if err := json.Unmarshal(encoded, &fields); err != nil {
+				t.Fatalf("Unmarshal: %v", err)
+			}
+			if got := fields["tcp_flags"]; got != tt.wantFlags {
+				t.Fatalf("tcp_flags = %v, want %q", got, tt.wantFlags)
+			}
+		})
+	}
+}
+
+func TestTextWriterFormatsTCPFlags(t *testing.T) {
+	t.Parallel()
+
+	var buf bytes.Buffer
+	w := &textWriter{w: &buf}
+
+	err := w.Write(&types.TCPRetransTracing{
+		ObservedTimestamp: "now",
+		TCPFlags:          "ACK|PSH",
+	})
+	if err != nil {
+		t.Fatalf("Write: %v", err)
+	}
+	if got := buf.String(); !strings.Contains(got, " flags=ACK|PSH ") {
+		t.Fatalf("output = %q, want rendered TCP flags", got)
 	}
 }
 

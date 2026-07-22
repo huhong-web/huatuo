@@ -182,7 +182,8 @@ Each event is an NDJSON object (`types.TCPRetransTracing`). Fields tagged with
 | `tcp_seq` | uint32 | `TCP_SKB_CB(skb)->seq` for SKB events, the retransmitted segment start sequence; zero for SYN-ACK events. |
 | `tcp_ack` | uint32 | `tcp_sk(sk)->rcv_nxt` for SKB events, the ACK sequence that the real retransmitted packet header will carry; zero for SYN-ACK events. |
 | `tcp_end_seq` | uint32 | `TCP_SKB_CB(skb)->end_seq` for SKB events, the retransmitted segment end sequence; omitted for SYN-ACK events. |
-| `tcp_flags` | uint8 | Raw `TCP_SKB_CB(skb)->tcp_flags` bits for SKB events; omitted for SYN-ACK events. |
+| `tcp_flags` | string | Rendered TCP flag set such as `SYN|ACK` or `ACK|PSH`; SKB events use `TCP_SKB_CB(skb)->tcp_flags`, and SYN-ACK events derive it from the event type. |
+| `tcp_flags_raw` | uint8 | Raw TCP flag bitmap; SKB events use `TCP_SKB_CB(skb)->tcp_flags`, and SYN-ACK events use the bitmap for `SYN|ACK`. |
 | `skb_addr` | string | Retransmission-queue SKB pointer in hex; absent for SYN-ACK events. |
 | `drop_location` | string | huatuo-bamai correlation heuristic; see §7. |
 | `source` | string | Optional source field; currently not set by the standalone CLI. |
@@ -190,13 +191,13 @@ Each event is an NDJSON object (`types.TCPRetransTracing`). Fields tagged with
 ### Text output format
 
 ```
-<timestamp> [<phase>/<reason>] <saddr>:<sport> > <daddr>:<dport> state=<STATE> [SYNACK] [skb=<addr>] [seq=<N> [end=<N>] ack=<N>] [flags=0xNN] pid=<N>[<comm>] ca=<N> retrans=<N>
+<timestamp> [<phase>/<reason>] <saddr>:<sport> > <daddr>:<dport> state=<STATE> [SYNACK] [skb=<addr>] [seq=<N> [end=<N>] ack=<N>] [flags=<FLAGS>] pid=<N>[<comm>] ca=<N> retrans=<N>
 ```
 
 Example:
 
 ```
-2026-07-08T09:19:52.042Z [data/RTO] 10.0.0.1:443 > 10.0.0.2:58244 state=ESTABLISHED skb=0xffff888012345678 seq=123456 end=124916 ack=789012 flags=0x10 pid=0[swapper/0] ca=4 retrans=3
+2026-07-08T09:19:52.042Z [data/RTO] 10.0.0.1:443 > 10.0.0.2:58244 state=ESTABLISHED skb=0xffff888012345678 seq=123456 end=124916 ack=789012 flags=ACK pid=0[swapper/0] ca=4 retrans=3
 ```
 
 The `pid` and `comm` in this example describe the execution context in which

@@ -207,20 +207,19 @@ func Parse(pkt *Hdr) (*Packet, error) {
 	return out, nil
 }
 
-// TCP flag bit positions used to index tcpFlagStrings. The bit assignment is
-// internal — only the (ordered) string output is observable.
+// TCP flag bits as encoded in a TCP header and in TCP_SKB_CB(skb)->tcp_flags.
 const (
-	flagSYN uint8 = 1 << iota
-	flagACK
-	flagFIN
-	flagRST
-	flagPSH
-	flagURG
-	flagECE
-	flagCWR
+	tcpFlagFIN uint8 = 0x01
+	tcpFlagSYN uint8 = 0x02
+	tcpFlagRST uint8 = 0x04
+	tcpFlagPSH uint8 = 0x08
+	tcpFlagACK uint8 = 0x10
+	tcpFlagURG uint8 = 0x20
+	tcpFlagECE uint8 = 0x40
+	tcpFlagCWR uint8 = 0x80
 )
 
-// tcpFlagStrings is a 256-entry lookup table from a packed flag byte to its
+// tcpFlagStrings is a 256-entry lookup table from a raw TCP flag byte to its
 // "SYN|ACK"-style rendering. Building strings via strings.Builder per packet
 // dominated the TCP hot path; precomputing all 2^8 combinations costs ~4 KB
 // of static memory and turns tcpFlags into a zero-allocation indexed read.
@@ -231,14 +230,14 @@ func init() {
 		bit  uint8
 		name string
 	}{
-		{flagSYN, "SYN"},
-		{flagACK, "ACK"},
-		{flagFIN, "FIN"},
-		{flagRST, "RST"},
-		{flagPSH, "PSH"},
-		{flagURG, "URG"},
-		{flagECE, "ECE"},
-		{flagCWR, "CWR"},
+		{tcpFlagSYN, "SYN"},
+		{tcpFlagACK, "ACK"},
+		{tcpFlagFIN, "FIN"},
+		{tcpFlagRST, "RST"},
+		{tcpFlagPSH, "PSH"},
+		{tcpFlagURG, "URG"},
+		{tcpFlagECE, "ECE"},
+		{tcpFlagCWR, "CWR"},
 	}
 
 	for i := 0; i < 256; i++ {
@@ -254,42 +253,47 @@ func init() {
 	}
 }
 
+// FormatTCPFlags renders a raw TCP flag byte as "SYN|ACK"-style text.
+func FormatTCPFlags(flags uint8) string {
+	return tcpFlagStrings[flags]
+}
+
 func tcpFlags(tcp *layers.TCP) string {
 	var b uint8
 
 	if tcp.SYN {
-		b |= flagSYN
+		b |= tcpFlagSYN
 	}
 
 	if tcp.ACK {
-		b |= flagACK
+		b |= tcpFlagACK
 	}
 
 	if tcp.FIN {
-		b |= flagFIN
+		b |= tcpFlagFIN
 	}
 
 	if tcp.RST {
-		b |= flagRST
+		b |= tcpFlagRST
 	}
 
 	if tcp.PSH {
-		b |= flagPSH
+		b |= tcpFlagPSH
 	}
 
 	if tcp.URG {
-		b |= flagURG
+		b |= tcpFlagURG
 	}
 
 	if tcp.ECE {
-		b |= flagECE
+		b |= tcpFlagECE
 	}
 
 	if tcp.CWR {
-		b |= flagCWR
+		b |= tcpFlagCWR
 	}
 
-	return tcpFlagStrings[b]
+	return FormatTCPFlags(b)
 }
 
 var tcpStateNames = []string{
