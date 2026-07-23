@@ -6,7 +6,7 @@ source "$(dirname "$0")/env.sh"
 source "${ROOT_DIR}/integration/lib.sh"
 
 TCPSHARK_BIN="${ROOT_DIR}/_output/bin/tcpshark"
-BPF_OBJ="${ROOT_DIR}/_output/bpf/tcp_retrans.o"
+BPF_OBJ="${ROOT_DIR}/_output/bpf/tcpshark.o"
 OUTPUT_DIR=$(mktemp -d /tmp/tcp_retrans_test.XXXXXX)
 
 [[ -x "${TCPSHARK_BIN}" ]] || fatal "tcpshark binary not found: ${TCPSHARK_BIN}"

@@ -195,6 +195,92 @@ func TestTextWriterFormatsTCPFlags(t *testing.T) {
 	}
 }
 
+func TestTextWriterFormatsAllEventFields(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		ev   *types.TCPRetransTracing
+		want string
+	}{
+		{
+			name: "full event",
+			ev: &types.TCPRetransTracing{
+				ObservedTimestamp:  "2026-07-23T02:14:40.304775546Z",
+				Comm:               "worker thread",
+				Pid:                1420,
+				ContainerID:        "container-1",
+				MemcgCssAddr:       1,
+				NetNamespaceCookie: 2,
+				NetNamespaceInode:  4026531992,
+				Saddr:              "127.0.0.1",
+				Daddr:              "127.0.0.1",
+				Sport:              19996,
+				Dport:              42128,
+				Family:             2,
+				State:              "ESTABLISHED",
+				Phase:              "data",
+				Reason:             "RTO",
+				EventType:          "tcp_retransmit_skb",
+				CaState:            4,
+				IcskRetransmits:    4,
+				IcskPending:        1,
+				ReordSeen:          2,
+				DsackDups:          3,
+				TCPSeq:             3154974646,
+				TCPAck:             948393597,
+				TCPEndSeq:          3154991030,
+				TCPFlags:           "ACK|PSH",
+				SkbAddr:            "0xffff931c14fdf800",
+				DropLocation:       "host_software",
+				Source:             "tcpshark",
+			},
+			want: "2026-07-23T02:14:40.304775546Z " +
+				"[data/RTO] 127.0.0.1:19996 > 127.0.0.1:42128 " +
+				"state=ESTABLISHED family=2 event_type=tcp_retransmit_skb " +
+				"skb=0xffff931c14fdf800 seq=3154974646 end=3154991030 " +
+				"ack=948393597 flags=ACK|PSH pid=1420 comm=worker thread " +
+				"ca=4 retrans=4 icsk_pending=1 reord_seen=2 dsack_dups=3 " +
+				"container_id=container-1 memcg_css=1 net_namespace_cookie=2 " +
+				"net_namespace_inode=4026531992 drop_location=host_software " +
+				"source=tcpshark\n",
+		},
+		{
+			name: "omitempty fields",
+			ev: &types.TCPRetransTracing{
+				ObservedTimestamp: "2026-07-23T02:14:40Z",
+				Saddr:             "127.0.0.1",
+				Daddr:             "127.0.0.1",
+				Sport:             19996,
+				Dport:             42128,
+				Family:            2,
+				State:             "ESTABLISHED",
+				Phase:             "data",
+				Reason:            "RTO",
+				EventType:         "tcp_retransmit_skb",
+			},
+			want: "2026-07-23T02:14:40Z " +
+				"[data/RTO] 127.0.0.1:19996 > 127.0.0.1:42128 " +
+				"state=ESTABLISHED family=2 event_type=tcp_retransmit_skb " +
+				"seq=0 ack=0 pid=0 comm= ca=0 retrans=0 icsk_pending=0\n",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			var output bytes.Buffer
+			if err := (&textWriter{w: &output}).Write(tt.ev); err != nil {
+				t.Fatalf("Write: %v", err)
+			}
+			if got := output.String(); got != tt.want {
+				t.Fatalf("output = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestTextWriterPropagatesIOError(t *testing.T) {
 	t.Parallel()
 

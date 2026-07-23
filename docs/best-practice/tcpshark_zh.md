@@ -109,7 +109,7 @@ tcpshark --mode retransmit [flags]
 |------|--------|------|
 | `--mode retransmit` | 必填 | 选择 TCP 重传追踪模式。 |
 | `--enable-tlp`、`--tlp` | 关闭 | 同时挂载 `tcp_send_loss_probe` 并输出 TLP 事件。 |
-| `--bpf-path <path>` | 必填 | `tcp_retrans.o` eBPF 对象文件路径。 |
+| `--bpf-path <path>` | 必填 | `tcpshark.o` eBPF 对象文件路径。 |
 | `--filter <expr>` | （无） | 仅用于 `tcp_retransmit_skb` 事件的 tcpdump 风格过滤器，见 §1。 |
 | `--duration <n>` | 0 | 运行 N 秒后退出（0 表示持续运行直至 Ctrl-C）。 |
 | `--output <json\|text>` | `text` | 输出格式；设置 `--output-storage` 时会被忽略。 |
@@ -123,27 +123,27 @@ tcpshark --mode retransmit [flags]
 
 ```bash
 # 文本格式输出全部重传相关事件
-sudo tcpshark --mode retransmit --bpf-path bpf/tcp_retrans.o
+sudo tcpshark --mode retransmit --bpf-path bpf/tcpshark.o
 
 # NDJSON 格式输出
-sudo tcpshark --mode retransmit --bpf-path bpf/tcp_retrans.o --output json
+sudo tcpshark --mode retransmit --bpf-path bpf/tcpshark.o --output json
 
 # 在 BPF 侧过滤目标端口为 443 的常规重传 SKB
-sudo tcpshark --mode retransmit --bpf-path bpf/tcp_retrans.o --filter "dst port 443"
+sudo tcpshark --mode retransmit --bpf-path bpf/tcpshark.o --filter "dst port 443"
 
 # 包含 Tail Loss Probe 事件（默认关闭）
-sudo tcpshark --mode retransmit --enable-tlp --bpf-path bpf/tcp_retrans.o
+sudo tcpshark --mode retransmit --enable-tlp --bpf-path bpf/tcpshark.o
 
 # 在用户态过滤全部格式化事件类型，只保留目标端口 443
-sudo tcpshark --mode retransmit --bpf-path bpf/tcp_retrans.o --output json \
+sudo tcpshark --mode retransmit --bpf-path bpf/tcpshark.o --output json \
   | jq -c 'select(.dport == 443)'
 
 # 运行 60 秒，仅保留分类为 RTO 的事件
-sudo tcpshark --mode retransmit --bpf-path bpf/tcp_retrans.o --duration 60 --output json \
+sudo tcpshark --mode retransmit --bpf-path bpf/tcpshark.o --duration 60 --output json \
   | jq -c 'select(.reason == "RTO")'
 
 # 将事件转发给正在运行的 huatuo-bamai 实例
-sudo tcpshark --mode retransmit --bpf-path bpf/tcp_retrans.o \
+sudo tcpshark --mode retransmit --bpf-path bpf/tcpshark.o \
   --output-storage /var/run/huatuo-toolstream.sock
 ```
 
@@ -183,21 +183,26 @@ sudo tcpshark --mode retransmit --bpf-path bpf/tcp_retrans.o \
 | `tcp_ack` | uint32 | SKB 事件中 `tcp_sk(sk)->rcv_nxt`，即实际重传包 TCP 头会携带的 ACK 序号；SYN-ACK 事件中为零。 |
 | `tcp_end_seq` | uint32 | SKB 事件中 `TCP_SKB_CB(skb)->end_seq`，即重传段结束序列号；SYN-ACK 事件中省略。 |
 | `tcp_flags` | string | 渲染后的 TCP flag 集合，如 `SYN|ACK`、`ACK|PSH`；SKB 事件来自 `TCP_SKB_CB(skb)->tcp_flags`，SYN-ACK 事件由事件类型派生。 |
-| `tcp_flags_raw` | uint8 | TCP flag 原始位图；SKB 事件来自 `TCP_SKB_CB(skb)->tcp_flags`，SYN-ACK 事件为 `SYN|ACK` 对应的位图。 |
 | `skb_addr` | string | 十六进制重传队列 SKB 指针；SYN-ACK 事件中不存在。 |
 | `drop_location` | string | huatuo-bamai 生成的丢包关联启发式结果，见 §7。 |
 | `source` | string | 可选来源字段；独立 CLI 当前不设置该字段。 |
 
 ### 文本输出格式
 
+文本输出保留面向终端的可读布局，同时覆盖与 JSON 相同的事件变量。带 `omitempty`
+的变量仅在非零或非空时显示，字符串值不添加 JSON 引号或转义。为兼容原文本格式，
+`state`、`skb`、`seq`、`end`、`ack`、`flags`、`ca` 和 `retrans` 分别对应 JSON
+中的 `tcp_state`、`skb_addr`、`tcp_seq`、`tcp_end_seq`、`tcp_ack`、`tcp_flags`、
+`ca_state` 和 `icsk_retransmits`。
+
 ```
-<timestamp> [<phase>/<reason>] <saddr>:<sport> > <daddr>:<dport> state=<STATE> [SYNACK] [skb=<addr>] [seq=<N> [end=<N>] ack=<N>] [flags=<FLAGS>] pid=<N>[<comm>] ca=<N> retrans=<N>
+<timestamp> [<phase>/<reason>] <saddr>:<sport> > <daddr>:<dport> state=<STATE> family=<N> event_type=<TYPE> [SYNACK] [skb=<ADDR>] seq=<N> [end=<N>] ack=<N> [flags=<FLAGS>] pid=<N> comm=<COMM> ca=<N> retrans=<N> icsk_pending=<N> [reord_seen=<N>] [dsack_dups=<N>] [container_id=<ID>] [memcg_css=<N>] [net_namespace_cookie=<N>] [net_namespace_inode=<N>] [drop_location=<LOCATION>] [source=<SOURCE>]
 ```
 
 示例：
 
 ```
-2026-07-08T09:19:52.042Z [data/RTO] 10.0.0.1:443 > 10.0.0.2:58244 state=ESTABLISHED skb=0xffff888012345678 seq=123456 end=124916 ack=789012 flags=ACK pid=0[swapper/0] ca=4 retrans=3
+2026-07-23T02:14:40.304775546Z [data/RTO] 127.0.0.1:19996 > 127.0.0.1:42128 state=ESTABLISHED family=2 event_type=tcp_retransmit_skb skb=0xffff931c14fdf800 seq=3154974646 end=3154991030 ack=948393597 flags=ACK|PSH pid=1420 comm=kube-apiserver ca=4 retrans=4 icsk_pending=0 net_namespace_inode=4026531992
 ```
 
 示例中的 `pid` 和 `comm` 表示 hook 运行时的执行上下文；工作负载归属应使用
@@ -288,7 +293,7 @@ huatuo-bamai 不会从 stdout 解析 NDJSON。典型参数如下：
 ```bash
 tcpshark \
   --mode retransmit \
-  --bpf-path <CoreBpfDir>/tcp_retrans.o \
+  --bpf-path <CoreBpfDir>/tcpshark.o \
   --output-storage /var/run/huatuo-toolstream.sock \
   --filter "dst port 443"
 ```

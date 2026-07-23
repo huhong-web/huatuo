@@ -42,7 +42,7 @@ type textWriter struct{ w io.Writer }
 
 func (s *textWriter) Write(ev *types.TCPRetransTracing) error {
 	detail := fmt.Sprintf(
-		"[%s/%s] %s:%d > %s:%d state=%s",
+		"[%s/%s] %s:%d > %s:%d state=%s family=%d event_type=%s",
 		ev.Phase,
 		ev.Reason,
 		ev.Saddr,
@@ -50,6 +50,8 @@ func (s *textWriter) Write(ev *types.TCPRetransTracing) error {
 		ev.Daddr,
 		ev.Dport,
 		ev.State,
+		ev.Family,
+		ev.EventType,
 	)
 	if ev.EventType == "tcp_retransmit_synack" {
 		detail += " [SYNACK]"
@@ -57,26 +59,47 @@ func (s *textWriter) Write(ev *types.TCPRetransTracing) error {
 	if ev.SkbAddr != "" {
 		detail += " skb=" + ev.SkbAddr
 	}
-	if ev.TCPSeq != 0 || ev.TCPEndSeq != 0 || ev.TCPAck != 0 {
-		detail += fmt.Sprintf(" seq=%d", ev.TCPSeq)
-		if ev.TCPEndSeq != 0 {
-			detail += fmt.Sprintf(" end=%d", ev.TCPEndSeq)
-		}
-		detail += fmt.Sprintf(" ack=%d", ev.TCPAck)
+	detail += fmt.Sprintf(" seq=%d", ev.TCPSeq)
+	if ev.TCPEndSeq != 0 {
+		detail += fmt.Sprintf(" end=%d", ev.TCPEndSeq)
 	}
+	detail += fmt.Sprintf(" ack=%d", ev.TCPAck)
 	if ev.TCPFlags != "" {
 		detail += " flags=" + ev.TCPFlags
 	}
-	_, err := fmt.Fprintf(
-		s.w,
-		"%s %s pid=%d[%s] ca=%d retrans=%d\n",
-		ev.ObservedTimestamp,
-		detail,
+	detail += fmt.Sprintf(
+		" pid=%d comm=%s ca=%d retrans=%d icsk_pending=%d",
 		ev.Pid,
 		ev.Comm,
 		ev.CaState,
 		ev.IcskRetransmits,
+		ev.IcskPending,
 	)
+	if ev.ReordSeen != 0 {
+		detail += fmt.Sprintf(" reord_seen=%d", ev.ReordSeen)
+	}
+	if ev.DsackDups != 0 {
+		detail += fmt.Sprintf(" dsack_dups=%d", ev.DsackDups)
+	}
+	if ev.ContainerID != "" {
+		detail += " container_id=" + ev.ContainerID
+	}
+	if ev.MemcgCssAddr != 0 {
+		detail += fmt.Sprintf(" memcg_css=%d", ev.MemcgCssAddr)
+	}
+	if ev.NetNamespaceCookie != 0 {
+		detail += fmt.Sprintf(" net_namespace_cookie=%d", ev.NetNamespaceCookie)
+	}
+	if ev.NetNamespaceInode != 0 {
+		detail += fmt.Sprintf(" net_namespace_inode=%d", ev.NetNamespaceInode)
+	}
+	if ev.DropLocation != "" {
+		detail += " drop_location=" + ev.DropLocation
+	}
+	if ev.Source != "" {
+		detail += " source=" + ev.Source
+	}
+	_, err := fmt.Fprintf(s.w, "%s %s\n", ev.ObservedTimestamp, detail)
 	return err
 }
 

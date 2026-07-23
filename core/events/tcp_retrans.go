@@ -30,7 +30,7 @@ import (
 	"huatuo-bamai/pkg/types"
 )
 
-//go:generate $BPF_COMPILE $BPF_INCLUDE -s $BPF_DIR/tcp_retrans.c -o $BPF_DIR/tcp_retrans.o
+//go:generate $BPF_COMPILE $BPF_INCLUDE -s $BPF_DIR/tcpshark.c -o $BPF_DIR/tcpshark.o
 
 type tcpRetransTracing struct{}
 
@@ -60,7 +60,7 @@ func (c *tcpRetransTracing) Start(ctx context.Context) error {
 
 	args := []string{
 		"--mode", "retransmit",
-		"--bpf-path", path.Join(internalconfig.CoreBpfDir, "tcp_retrans.o"),
+		"--bpf-path", path.Join(internalconfig.CoreBpfDir, "tcpshark.o"),
 		"--output-storage", toolstream.DefaultSockPath,
 	}
 

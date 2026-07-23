@@ -115,7 +115,7 @@ tcpshark --mode retransmit [flags]
 |------|---------|-------------|
 | `--mode retransmit` | required | Select TCP retransmission tracing mode. |
 | `--enable-tlp`, `--tlp` | disabled | Also attach `tcp_send_loss_probe` and emit TLP events. |
-| `--bpf-path <path>` | required | Path to the `tcp_retrans.o` eBPF object file. |
+| `--bpf-path <path>` | required | Path to the `tcpshark.o` eBPF object file. |
 | `--filter <expr>` | (none) | tcpdump-style filter for `tcp_retransmit_skb` events; see §1. |
 | `--duration <n>` | 0 | Stop after N seconds (0 = run until Ctrl-C). |
 | `--output <json\|text>` | `text` | Output format; ignored when `--output-storage` is set. |
@@ -129,27 +129,27 @@ When both `--output` and `--output-storage` are explicitly specified,
 
 ```bash
 # Text output for all retransmission-related events
-sudo tcpshark --mode retransmit --bpf-path bpf/tcp_retrans.o
+sudo tcpshark --mode retransmit --bpf-path bpf/tcpshark.o
 
 # NDJSON output
-sudo tcpshark --mode retransmit --bpf-path bpf/tcp_retrans.o --output json
+sudo tcpshark --mode retransmit --bpf-path bpf/tcpshark.o --output json
 
 # BPF-side filter for regular retransmitted SKBs to port 443
-sudo tcpshark --mode retransmit --bpf-path bpf/tcp_retrans.o --filter "dst port 443"
+sudo tcpshark --mode retransmit --bpf-path bpf/tcpshark.o --filter "dst port 443"
 
 # Include Tail Loss Probe events (disabled by default)
-sudo tcpshark --mode retransmit --enable-tlp --bpf-path bpf/tcp_retrans.o
+sudo tcpshark --mode retransmit --enable-tlp --bpf-path bpf/tcpshark.o
 
 # Filter all formatted event types to destination port 443 in userspace
-sudo tcpshark --mode retransmit --bpf-path bpf/tcp_retrans.o --output json \
+sudo tcpshark --mode retransmit --bpf-path bpf/tcpshark.o --output json \
   | jq -c 'select(.dport == 443)'
 
 # Keep only events classified as RTO for 60 seconds
-sudo tcpshark --mode retransmit --bpf-path bpf/tcp_retrans.o --duration 60 --output json \
+sudo tcpshark --mode retransmit --bpf-path bpf/tcpshark.o --duration 60 --output json \
   | jq -c 'select(.reason == "RTO")'
 
 # Forward events to a running huatuo-bamai instance
-sudo tcpshark --mode retransmit --bpf-path bpf/tcp_retrans.o \
+sudo tcpshark --mode retransmit --bpf-path bpf/tcpshark.o \
   --output-storage /var/run/huatuo-toolstream.sock
 ```
 
@@ -190,21 +190,28 @@ Each event is an NDJSON object (`types.TCPRetransTracing`). Fields tagged with
 | `tcp_ack` | uint32 | `tcp_sk(sk)->rcv_nxt` for SKB events, the ACK sequence that the real retransmitted packet header will carry; zero for SYN-ACK events. |
 | `tcp_end_seq` | uint32 | `TCP_SKB_CB(skb)->end_seq` for SKB events, the retransmitted segment end sequence; omitted for SYN-ACK events. |
 | `tcp_flags` | string | Rendered TCP flag set such as `SYN|ACK` or `ACK|PSH`; SKB events use `TCP_SKB_CB(skb)->tcp_flags`, and SYN-ACK events derive it from the event type. |
-| `tcp_flags_raw` | uint8 | Raw TCP flag bitmap; SKB events use `TCP_SKB_CB(skb)->tcp_flags`, and SYN-ACK events use the bitmap for `SYN|ACK`. |
 | `skb_addr` | string | Retransmission-queue SKB pointer in hex; absent for SYN-ACK events. |
 | `drop_location` | string | huatuo-bamai correlation heuristic; see §7. |
 | `source` | string | Optional source field; currently not set by the standalone CLI. |
 
 ### Text output format
 
+Text retains its terminal-friendly layout while covering the same event
+variables as JSON. Variables tagged with `omitempty` appear only when non-zero
+or non-empty, and string values are not JSON-quoted or escaped. For compatibility
+with the original text format, `state`, `skb`, `seq`, `end`, `ack`, `flags`,
+`ca`, and `retrans` correspond to the JSON fields `tcp_state`, `skb_addr`,
+`tcp_seq`, `tcp_end_seq`, `tcp_ack`, `tcp_flags`, `ca_state`, and
+`icsk_retransmits`, respectively.
+
 ```
-<timestamp> [<phase>/<reason>] <saddr>:<sport> > <daddr>:<dport> state=<STATE> [SYNACK] [skb=<addr>] [seq=<N> [end=<N>] ack=<N>] [flags=<FLAGS>] pid=<N>[<comm>] ca=<N> retrans=<N>
+<timestamp> [<phase>/<reason>] <saddr>:<sport> > <daddr>:<dport> state=<STATE> family=<N> event_type=<TYPE> [SYNACK] [skb=<ADDR>] seq=<N> [end=<N>] ack=<N> [flags=<FLAGS>] pid=<N> comm=<COMM> ca=<N> retrans=<N> icsk_pending=<N> [reord_seen=<N>] [dsack_dups=<N>] [container_id=<ID>] [memcg_css=<N>] [net_namespace_cookie=<N>] [net_namespace_inode=<N>] [drop_location=<LOCATION>] [source=<SOURCE>]
 ```
 
 Example:
 
 ```
-2026-07-08T09:19:52.042Z [data/RTO] 10.0.0.1:443 > 10.0.0.2:58244 state=ESTABLISHED skb=0xffff888012345678 seq=123456 end=124916 ack=789012 flags=ACK pid=0[swapper/0] ca=4 retrans=3
+2026-07-23T02:14:40.304775546Z [data/RTO] 127.0.0.1:19996 > 127.0.0.1:42128 state=ESTABLISHED family=2 event_type=tcp_retransmit_skb skb=0xffff931c14fdf800 seq=3154974646 end=3154991030 ack=948393597 flags=ACK|PSH pid=1420 comm=kube-apiserver ca=4 retrans=4 icsk_pending=0 net_namespace_inode=4026531992
 ```
 
 The `pid` and `comm` in this example describe the execution context in which
@@ -303,7 +310,7 @@ NDJSON from stdout in this mode. Typical arguments are:
 ```bash
 tcpshark \
   --mode retransmit \
-  --bpf-path <CoreBpfDir>/tcp_retrans.o \
+  --bpf-path <CoreBpfDir>/tcpshark.o \
   --output-storage /var/run/huatuo-toolstream.sock \
   --filter "dst port 443"
 ```

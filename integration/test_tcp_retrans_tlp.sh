@@ -20,7 +20,7 @@ source "$(dirname "$0")/env.sh"
 source "${ROOT_DIR}/integration/lib.sh"
 
 TCPSHARK_BIN="${ROOT_DIR}/_output/bin/tcpshark"
-BPF_OBJ="${ROOT_DIR}/_output/bpf/tcp_retrans.o"
+BPF_OBJ="${ROOT_DIR}/_output/bpf/tcpshark.o"
 OUTPUT_DIR=$(mktemp -d /tmp/tcp_retrans_tlp.XXXXXX)
 TEST_PORT=19996
 PAYLOAD_SIZE=262144 # 256 KB
