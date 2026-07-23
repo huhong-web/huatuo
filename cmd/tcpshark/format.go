@@ -33,7 +33,7 @@ import (
 
 const tcpFlagsSynAck uint8 = 0x12 // SYN(0x02) | ACK(0x10)
 
-// writer is the single write destination for a tcpretrans session.
+// writer is the single write destination for a tcpshark session.
 type writer interface {
 	Write(ev *types.TCPRetransTracing) error
 }
@@ -115,7 +115,7 @@ func newWriter(opt *writerOption) (writer, func(), error) {
 			TaskID:   opt.taskID,
 		})
 		if err != nil {
-			return nil, nil, fmt.Errorf("tcpretrans: --output-storage: %w", err)
+			return nil, nil, fmt.Errorf("tcpshark: --output-storage: %w", err)
 		}
 		return &socketWriter{client: client}, client.End, nil
 	}
@@ -152,6 +152,8 @@ func formatEvent(ev *retransEvent) *types.TCPRetransTracing {
 		eventTypeStr = "tcp_retransmit_skb"
 	case retransEventSynack:
 		eventTypeStr = "tcp_retransmit_synack"
+	case retransEventTLP:
+		eventTypeStr = "tcp_send_loss_probe"
 	}
 
 	return &types.TCPRetransTracing{
@@ -187,6 +189,8 @@ func classifyEvent(ev *retransEvent, tcpFlags string) (packet.RetransPhase, pack
 	switch ev.EventType {
 	case retransEventSynack:
 		return packet.RetransPhaseConnect, packet.RetransReasonRTO
+	case retransEventTLP:
+		return packet.RetransPhaseData, packet.RetransReasonTLP
 	default:
 		return packet.ClassifyRetrans(
 			uint8(ev.State),

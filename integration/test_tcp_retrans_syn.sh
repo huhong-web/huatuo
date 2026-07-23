@@ -5,33 +5,33 @@ set -euo pipefail
 source "$(dirname "$0")/env.sh"
 source "${ROOT_DIR}/integration/lib.sh"
 
-TCPRETRANS_BIN="${ROOT_DIR}/_output/bin/tcpretrans"
+TCPSHARK_BIN="${ROOT_DIR}/_output/bin/tcpshark"
 BPF_OBJ="${ROOT_DIR}/_output/bpf/tcp_retrans.o"
 OUTPUT_DIR=$(mktemp -d /tmp/tcp_retrans_test.XXXXXX)
 
-[[ -x "${TCPRETRANS_BIN}" ]] || fatal "tcpretrans binary not found: ${TCPRETRANS_BIN}"
+[[ -x "${TCPSHARK_BIN}" ]] || fatal "tcpshark binary not found: ${TCPSHARK_BIN}"
 [[ -f "${BPF_OBJ}" ]] || fatal "BPF object not found: ${BPF_OBJ}"
 
 cleanup() {
-	[[ -n "${TCPRETRANS_PID:-}" ]] && kill "${TCPRETRANS_PID}" 2> /dev/null || true
+	[[ -n "${TCPSHARK_PID:-}" ]] && kill "${TCPSHARK_PID}" 2> /dev/null || true
 	sleep 0.2
-	[[ -n "${TCPRETRANS_PID:-}" ]] && kill -9 "${TCPRETRANS_PID}" 2> /dev/null || true
+	[[ -n "${TCPSHARK_PID:-}" ]] && kill -9 "${TCPSHARK_PID}" 2> /dev/null || true
 	rm -rf "${OUTPUT_DIR}"
 }
 trap cleanup EXIT
 
 log_info "S0/EXP1: SYN retrans (connect/RTO) via black-hole IP"
 
-"${TCPRETRANS_BIN}" --bpf-path "${BPF_OBJ}" --duration 6 --output json > "${OUTPUT_DIR}/events.json" 2> "${OUTPUT_DIR}/stderr.log" &
-TCPRETRANS_PID=$!
+"${TCPSHARK_BIN}" --mode retransmit --bpf-path "${BPF_OBJ}" --duration 6 --output json > "${OUTPUT_DIR}/events.json" 2> "${OUTPUT_DIR}/stderr.log" &
+TCPSHARK_PID=$!
 sleep 1
 
 timeout 2 bash -c "exec 3<>/dev/tcp/192.0.2.1/19991" 2> /dev/null || true
 sleep 4
 
-kill "${TCPRETRANS_PID}" 2> /dev/null || true
+kill "${TCPSHARK_PID}" 2> /dev/null || true
 sleep 0.3
-TCPRETRANS_PID=""
+TCPSHARK_PID=""
 
 SYN_COUNT=$(grep -c '"phase":"connect"' "${OUTPUT_DIR}/events.json" 2> /dev/null || true)
 SYN_COUNT=${SYN_COUNT:-0}

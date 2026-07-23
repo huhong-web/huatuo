@@ -19,12 +19,12 @@ weight: 4
 
 ```bash
 # The global blacklist for tracing and metrics
-BlackList = ["netdev_hw", "metax_gpu"]
+BlackList = ["netdev_hw", "metax_gpu", "tcp_retrans"]
 ```
 
 - **BlackList**：全局追踪与指标黑名单。 
 
-  用于排除特定模块或追踪和指标采集，避免无关噪声或高开销探针。例如 ["netdev_hw", "metax_gpu"]，即全局禁用网络设备硬件层（netdev_hw）和 Metax GPU 相关的追踪与指标。
+  用于排除特定模块或追踪和指标采集，避免无关噪声或高开销探针。默认名单包含 `tcp_retrans`，因此 TCP 重传追踪及其丢包关联缓存默认关闭；从名单中移除 `tcp_retrans` 并重启 `huatuo-bamai` 后才会启用。
 
   **说明**：添加黑名单项可有效降低资源消耗，尤其在特定硬件环境中；支持数组格式，可根据实际业务扩展。
 

@@ -28,18 +28,33 @@ import (
 	"huatuo-bamai/internal/log"
 )
 
+const (
+	bpfProgramRetransmitSKB    = "retrans_skb"
+	bpfProgramRetransmitSynack = "retrans_synack"
+	bpfProgramRetransmitTLP    = "retrans_tlp"
+)
+
 func mainAction(c *cli.Context) error {
+	switch c.String(cliFlagMode) {
+	case modeRetransmit:
+		return runRetransmit(c)
+	default:
+		return fmt.Errorf("tcpshark: unsupported mode %q", c.String(cliFlagMode))
+	}
+}
+
+func runRetransmit(c *cli.Context) error {
 	duration := c.Int(cliFlagDuration)
 	outputFmt := c.String(cliFlagOutput)
 
 	if err := bpf.NewManager(&bpf.Option{KeepaliveTimeout: duration}); err != nil {
-		return fmt.Errorf("tcpretrans: init bpf manager: %w", err)
+		return fmt.Errorf("tcpshark: init bpf manager: %w", err)
 	}
 	defer bpf.Close()
 
 	bpfObj, err := loadTCPRetransBPFWithFilter(c.String(cliFlagBpfPath), c.String(cliFlagFilter))
 	if err != nil {
-		return fmt.Errorf("tcpretrans: load bpf: %w", err)
+		return fmt.Errorf("tcpshark: load retransmit bpf: %w", err)
 	}
 	defer bpfObj.Close()
 
@@ -64,9 +79,13 @@ func mainAction(c *cli.Context) error {
 		}
 	}()
 
-	reader, err := bpfObj.AttachAndEventPipe(runCtx, "perf_events", 8192)
+	reader, err := attachRetransmitPrograms(
+		runCtx,
+		bpfObj,
+		c.Bool(cliFlagEnableTLP),
+	)
 	if err != nil {
-		return fmt.Errorf("tcpretrans: attach: %w", err)
+		return fmt.Errorf("tcpshark: attach retransmit probes: %w", err)
 	}
 	defer reader.Close()
 
@@ -75,7 +94,7 @@ func mainAction(c *cli.Context) error {
 	sink, sinkCleanup, err := newWriter(&writerOption{
 		outputFmt: outputFmt,
 		sockPath:  c.String(cliFlagOutputStorage),
-		toolName:  tcpRetransToolName,
+		toolName:  tcpSharkToolName,
 		version:   AppVersion,
 		taskID:    c.String(cliFlagTaskID),
 	})
@@ -94,13 +113,51 @@ func mainAction(c *cli.Context) error {
 			if runCtx.Err() != nil {
 				return nil
 			}
-			log.Errorf("tcpretrans: read: %v", err)
+			log.Errorf("tcpshark: read retransmit event: %v", err)
 			continue
 		}
 
 		if err := sink.Write(formatEvent(&ev)); err != nil {
-			log.Errorf("tcpretrans: send event: %v", err)
+			log.Errorf("tcpshark: send retransmit event: %v", err)
 			return nil
 		}
 	}
+}
+
+func attachRetransmitPrograms(
+	ctx context.Context,
+	bpfObj bpf.BPF,
+	isTLPEnabled bool,
+) (bpf.PerfEventReader, error) {
+	reader, err := bpfObj.EventPipeByName(ctx, "perf_events", 8192)
+	if err != nil {
+		return nil, err
+	}
+
+	if err := bpfObj.AttachWithOptions(retransmitAttachOptions(isTLPEnabled)); err != nil {
+		reader.Close()
+		return nil, err
+	}
+	return reader, nil
+}
+
+func retransmitAttachOptions(isTLPEnabled bool) []bpf.AttachOption {
+	options := []bpf.AttachOption{
+		{
+			ProgramName: bpfProgramRetransmitSKB,
+			Symbol:      "tcp/tcp_retransmit_skb",
+		},
+		{
+			ProgramName: bpfProgramRetransmitSynack,
+			Symbol:      "tcp/tcp_retransmit_synack",
+		},
+	}
+	if isTLPEnabled {
+		options = append(options, bpf.AttachOption{
+			ProgramName: bpfProgramRetransmitTLP,
+			Symbol:      "tcp_send_loss_probe",
+		})
+	}
+
+	return options
 }

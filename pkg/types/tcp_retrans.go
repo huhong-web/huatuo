@@ -44,10 +44,10 @@ type TCPRetransTracing struct {
 
 	// Phase / Reason classification
 	Phase  string `json:"phase"`  // "connect", "data", "close"
-	Reason string `json:"reason"` // "RTO", "fast_retransmit", "reorder_prone_fast", "spurious", "unknown"
+	Reason string `json:"reason"` // "RTO", "fast_retransmit", "reorder_prone_fast", "TLP", "spurious", "unknown"
 
 	// Event discriminator
-	EventType string `json:"event_type"` // "tcp_retransmit_skb" or "tcp_retransmit_synack"
+	EventType string `json:"event_type"` // "tcp_retransmit_skb", "tcp_retransmit_synack", or "tcp_send_loss_probe"
 
 	// Congestion control state (raw BPF fields)
 	CaState         uint8 `json:"ca_state"`         // icsk_ca_state: 0=Open, 3=Recovery, 4=Loss
@@ -63,6 +63,8 @@ type TCPRetransTracing struct {
 	// tcp_retransmit_skb is headerless, so tcphdr.seq/ack_seq are not reliable.
 	// tcp_flags is the rendered TCP flag set, e.g. "ACK|PSH".
 	// For tcp_retransmit_synack, tcp_flags is derived from the event type.
+	// For tcp_send_loss_probe, tcp_seq/tcp_ack contain snd_nxt/snd_una and the
+	// remaining TCP metadata is unavailable at the probe point.
 	TCPSeq    uint32 `json:"tcp_seq"`
 	TCPAck    uint32 `json:"tcp_ack"`
 	TCPEndSeq uint32 `json:"tcp_end_seq,omitempty"`

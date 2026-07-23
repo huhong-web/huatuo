@@ -28,7 +28,8 @@ type dropCacheEntry struct {
 }
 
 type dropCache struct {
-	mu            sync.RWMutex
+	mu            sync.Mutex
+	isEnabled     bool
 	entries       map[connKey][]dropCacheEntry
 	window        time.Duration
 	lastCleanupAt time.Time
@@ -43,17 +44,47 @@ func newDropCache(window time.Duration) *dropCache {
 	}
 }
 
+func (c *dropCache) enable() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	if c.isEnabled {
+		return
+	}
+	c.isEnabled = true
+	c.resetLocked()
+}
+
+func (c *dropCache) disable() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	if !c.isEnabled {
+		return
+	}
+	c.isEnabled = false
+	c.resetLocked()
+}
+
+func (c *dropCache) resetLocked() {
+	c.entries = make(map[connKey][]dropCacheEntry)
+	c.lastCleanupAt = time.Time{}
+}
+
 func (c *dropCache) add(ev *types.DropWatchTracing) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	if !c.isEnabled {
+		return
+	}
+
 	key, ok := makeDropKeyFromLayers(ev.Layers)
 	if !ok {
 		return
 	}
 
 	now := time.Now()
-
-	c.mu.Lock()
-	defer c.mu.Unlock()
-
 	c.cleanupExpired(now)
 	c.entries[key] = append(c.entries[key], dropCacheEntry{
 		ev:       ev,
@@ -80,12 +111,15 @@ func makeDropKeyFromLayers(p *packet.Packet) (connKey, bool) {
 }
 
 func (c *dropCache) correlate(retrans *types.TCPRetransTracing) (RetransDropCausal, *types.DropWatchTracing) {
-	key := makeRetransKey(retrans)
-	now := time.Now()
-
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
+	if !c.isEnabled {
+		return RetransDropNone, nil
+	}
+
+	key := makeRetransKey(retrans)
+	now := time.Now()
 	entries, ok := c.entries[key]
 	if !ok {
 		return RetransNoDrop, nil

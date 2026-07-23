@@ -5,7 +5,7 @@ set -euo pipefail
 source "$(dirname "$0")/env.sh"
 source "${ROOT_DIR}/integration/lib.sh"
 
-TCPRETRANS_BIN="${ROOT_DIR}/_output/bin/tcpretrans"
+TCPSHARK_BIN="${ROOT_DIR}/_output/bin/tcpshark"
 BPF_OBJ="${ROOT_DIR}/_output/bpf/tcp_retrans.o"
 OUTPUT_DIR=$(mktemp -d /tmp/tcp_retrans_fast.XXXXXX)
 TEST_PORT=19998
@@ -19,7 +19,7 @@ S_ADDR="10.99.0.1"
 C_ADDR="10.99.0.2"
 NET_MASK="24"
 
-[[ -x "${TCPRETRANS_BIN}" ]] || fatal "tcpretrans binary not found: ${TCPRETRANS_BIN}"
+[[ -x "${TCPSHARK_BIN}" ]] || fatal "tcpshark binary not found: ${TCPSHARK_BIN}"
 [[ -f "${BPF_OBJ}" ]] || fatal "BPF object not found: ${BPF_OBJ}"
 
 # connbytes module check — skip gracefully if unavailable (minimal kernels).
@@ -31,7 +31,7 @@ fi
 require_nc
 
 cleanup() {
-	[[ -n "${TCPRETRANS_PID:-}" ]] && kill "${TCPRETRANS_PID}" 2> /dev/null || true
+	[[ -n "${TCPSHARK_PID:-}" ]] && kill "${TCPSHARK_PID}" 2> /dev/null || true
 	[[ -n "${SRV_PID:-}" ]] && kill "${SRV_PID}" 2> /dev/null || true
 	[[ -n "${CLI_PID:-}" ]] && kill "${CLI_PID}" 2> /dev/null || true
 	ip netns del "${NS_S}" 2> /dev/null || true
@@ -73,9 +73,9 @@ ip netns exec "${NS_C}" iptables -I INPUT 1 -p tcp --sport "${TEST_PORT}" \
 	--connbytes-mode packets -j DROP
 log_info "connbytes rule: drop reply packet #30 in client netns"
 
-# 3. Start tcpretrans in the root netns (sees all netns traffic via BPF).
-"${TCPRETRANS_BIN}" --bpf-path "${BPF_OBJ}" --duration 15 --output json > "${OUTPUT_DIR}/events.json" 2> "${OUTPUT_DIR}/stderr.log" &
-TCPRETRANS_PID=$!
+# 3. Start tcpshark in retransmit mode in the root netns (sees all netns traffic via BPF).
+"${TCPSHARK_BIN}" --mode retransmit --bpf-path "${BPF_OBJ}" --duration 15 --output json > "${OUTPUT_DIR}/events.json" 2> "${OUTPUT_DIR}/stderr.log" &
+TCPSHARK_PID=$!
 sleep 1
 
 # 4. Server: nc listens and sends 2 MB of data.
@@ -90,9 +90,9 @@ CLI_PID=$!
 # 6. Wait for data transfer + fast retransmit (3 dup ACKs are fast on veth).
 sleep 10
 
-kill "${TCPRETRANS_PID}" 2> /dev/null || true
+kill "${TCPSHARK_PID}" 2> /dev/null || true
 sleep 0.3
-TCPRETRANS_PID=""
+TCPSHARK_PID=""
 
 # Filter events for our test port (server-side sport).
 grep "\"sport\":${TEST_PORT}" "${OUTPUT_DIR}/events.json" > "${OUTPUT_DIR}/filtered.json" 2> /dev/null || true

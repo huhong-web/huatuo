@@ -16,6 +16,7 @@
 
 #define RETRANS_EVENT_SKB    1
 #define RETRANS_EVENT_SYNACK 2
+#define RETRANS_EVENT_TLP    3
 
 #define TCP_NEW_SYN_RECV 12
 
@@ -165,6 +166,21 @@ static __always_inline void read_icsk_pending(struct sock *sk, struct retrans_ev
 		ev->icsk_pending = BPF_CORE_READ(icsk, icsk_pending);
 }
 
+/* TLP has no retransmission skb at this probe point. snd_nxt is the closest
+ * available sequence number for the probe, while snd_una is the oldest
+ * unacknowledged sequence number. */
+static __always_inline void read_tlp_tcp_info(struct retrans_event *ev,
+					       struct sock *sk)
+{
+	struct tcp_sock *tp = (struct tcp_sock *)sk;
+
+	if (bpf_core_field_exists(((struct tcp_sock *)0)->snd_nxt))
+		ev->tcp_seq = BPF_CORE_READ(tp, snd_nxt);
+
+	if (bpf_core_field_exists(((struct tcp_sock *)0)->snd_una))
+		ev->tcp_ack = BPF_CORE_READ(tp, snd_una);
+}
+
 static __always_inline void fill_retrans_event_from_sk(struct retrans_event *ev,
 							struct sock *sk)
 {
@@ -229,7 +245,7 @@ struct tcp_retransmit_skb_ctx {
 };
 
 SEC("tracepoint/tcp/tcp_retransmit_skb")
-int tcp_retransmit_skb_prog(struct tcp_retransmit_skb_ctx *ctx)
+int retrans_skb(struct tcp_retransmit_skb_ctx *ctx)
 {
 	struct sk_buff *skb = (struct sk_buff *)ctx->skbaddr;
 
@@ -255,7 +271,7 @@ int tcp_retransmit_skb_prog(struct tcp_retransmit_skb_ctx *ctx)
 }
 
 SEC("tracepoint/tcp/tcp_retransmit_synack")
-int tcp_retransmit_synack_prog(struct trace_event_raw_tcp_retransmit_synack *ctx)
+int retrans_synack(struct trace_event_raw_tcp_retransmit_synack *ctx)
 {
 	struct retrans_event ev = {};
 
@@ -288,6 +304,27 @@ int tcp_retransmit_synack_prog(struct trace_event_raw_tcp_retransmit_synack *ctx
 	ev.ca_state = 0;
 
 	fill_addrs_from_req(&ev, req);
+
+	bpf_perf_event_output(ctx, &perf_events, COMPAT_BPF_F_CURRENT_CPU, &ev, sizeof(ev));
+	return 0;
+}
+
+SEC("kprobe/tcp_send_loss_probe")
+int retrans_tlp(struct pt_regs *ctx)
+{
+	struct retrans_event ev = {};
+	struct sock *sk = (struct sock *)PT_REGS_PARM1_CORE(ctx);
+
+	if (!sk)
+		return 0;
+
+	ev.event_type = RETRANS_EVENT_TLP;
+	ev.ktime_ns = bpf_ktime_get_ns();
+	ev.tgid_pid = bpf_get_current_pid_tgid();
+	bpf_get_current_comm(&ev.comm, sizeof(ev.comm));
+
+	fill_retrans_event_from_sk(&ev, sk);
+	read_tlp_tcp_info(&ev, sk);
 
 	bpf_perf_event_output(ctx, &perf_events, COMPAT_BPF_F_CURRENT_CPU, &ev, sizeof(ev));
 	return 0;

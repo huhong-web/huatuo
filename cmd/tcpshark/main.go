@@ -24,21 +24,23 @@ import (
 
 //go:generate $BPF_COMPILE $BPF_INCLUDE -s $BPF_DIR/tcp_retrans.c -o $BPF_DIR/tcp_retrans.o
 
-var (
-	tcpRetransToolName = "tcpretrans"
-	AppVersion         = ""
-)
+const tcpSharkToolName = "tcpshark"
 
-func main() {
-	app := &cli.App{
-		Name:    tcpRetransToolName,
+var AppVersion = ""
+
+func newApp() *cli.App {
+	return &cli.App{
+		Name:    tcpSharkToolName,
 		Version: AppVersion,
-		Usage:   "watch TCP retransmissions classified by connection state machine phase",
+		Usage:   "trace TCP events",
 		Flags:   appFlags(),
 		Action:  mainAction,
 		Before:  validateFlags,
 	}
+}
 
+func main() {
+	app := newApp()
 	if err := app.Run(os.Args); err != nil {
 		log.Errorf("%v", err)
 		os.Exit(1)

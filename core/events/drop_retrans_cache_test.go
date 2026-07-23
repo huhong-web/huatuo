@@ -46,6 +46,7 @@ func TestCausalToDropLocation(t *testing.T) {
 
 func TestDropCacheCorrelate(t *testing.T) {
 	cache := newDropCache(2 * time.Second)
+	cache.enable()
 
 	key := makeConnKey("10.0.0.1", "10.0.0.2", 1234, 80)
 	cache.entries[key] = []dropCacheEntry{
@@ -89,6 +90,7 @@ func TestDropCacheCorrelate(t *testing.T) {
 
 func TestDropCacheAddCleansExpired(t *testing.T) {
 	cache := newDropCache(time.Second)
+	cache.enable()
 	now := time.Now()
 	cache.entries = map[connKey][]dropCacheEntry{
 		"expired": {
@@ -108,6 +110,41 @@ func TestDropCacheAddCleansExpired(t *testing.T) {
 	}
 	if got := len(cache.entries["live"]); got != 1 {
 		t.Errorf("live entries = %d, want 1", got)
+	}
+}
+
+func TestDropCacheLifecycle(t *testing.T) {
+	cache := newDropCache(time.Second)
+	event := &types.DropWatchTracing{
+		Layers: tcpPacketLayers("10.0.0.1", "10.0.0.2", 1234, 80),
+	}
+	retrans := &types.TCPRetransTracing{
+		Saddr: "10.0.0.1",
+		Daddr: "10.0.0.2",
+		Sport: 1234,
+		Dport: 80,
+	}
+
+	cache.add(event)
+	if got := len(cache.entries); got != 0 {
+		t.Fatalf("disabled cache entries = %d, want 0", got)
+	}
+	if causal, _ := cache.correlate(retrans); causal != RetransDropNone {
+		t.Fatalf("disabled cache correlation = %v, want %v", causal, RetransDropNone)
+	}
+
+	cache.enable()
+	cache.add(event)
+	if got := len(cache.entries); got != 1 {
+		t.Fatalf("enabled cache entries = %d, want 1", got)
+	}
+
+	cache.disable()
+	if got := len(cache.entries); got != 0 {
+		t.Fatalf("disabled cache entries after reset = %d, want 0", got)
+	}
+	if causal, _ := cache.correlate(retrans); causal != RetransDropNone {
+		t.Fatalf("disabled cache correlation after reset = %v, want %v", causal, RetransDropNone)
 	}
 }
 

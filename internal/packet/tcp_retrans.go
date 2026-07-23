@@ -45,6 +45,7 @@ const (
 	RetransReasonRTO              RetransReason = iota // RTO timeout — worst case, cwnd collapses
 	RetransReasonFast                                  // Fast retransmit (dupACK/SACK/RACK), cwnd halves
 	RetransReasonReorderProneFast                      // Fast retransmit on a flow with prior reorder history
+	RetransReasonTLP                                   // Tail Loss Probe
 	RetransReasonSpurious                              // DSACK-verified unnecessary retrans (Layer 1)
 	RetransReasonUnknown                               // insufficient data to determine
 )
@@ -57,6 +58,8 @@ func (r RetransReason) String() string {
 		return "fast_retransmit"
 	case RetransReasonReorderProneFast:
 		return "reorder_prone_fast"
+	case RetransReasonTLP:
+		return "TLP"
 	case RetransReasonSpurious:
 		return "spurious"
 	default:
@@ -75,7 +78,13 @@ func (r RetransReason) String() string {
 //
 // Phase is derived from sk_state. Reorder history is used to distinguish
 // ReorderProneFast from Fast when ca_state=Recovery.
-func ClassifyRetrans(skStateNum uint8, tcpFlags string, caState uint8, reordSeen, dsackDups uint32) (RetransPhase, RetransReason) {
+func ClassifyRetrans(
+	skStateNum uint8,
+	tcpFlags string,
+	caState uint8,
+	reordSeen uint32,
+	dsackDups uint32,
+) (RetransPhase, RetransReason) {
 	phase := phaseFromState(skStateNum, tcpFlags)
 	reason := reasonFromTree(caState, reordSeen, dsackDups, phase)
 	return phase, reason

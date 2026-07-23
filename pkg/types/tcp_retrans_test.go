@@ -89,6 +89,23 @@ func TestTCPRetransTracingRoundTrip(t *testing.T) {
 				EventType:         "tcp_retransmit_synack",
 			},
 		},
+		{
+			name: "tlp event",
+			ev: &TCPRetransTracing{
+				ObservedTimestamp: "2026-07-08T00:00:00Z",
+				Saddr:             "10.0.0.1",
+				Daddr:             "10.0.0.2",
+				Sport:             6443,
+				Dport:             50000,
+				Family:            2,
+				State:             "ESTABLISHED",
+				Phase:             "data",
+				Reason:            "TLP",
+				EventType:         "tcp_send_loss_probe",
+				TCPSeq:            123,
+				TCPAck:            100,
+			},
+		},
 	}
 
 	for _, tt := range tests {

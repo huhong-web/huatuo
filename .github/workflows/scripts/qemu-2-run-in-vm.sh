@@ -102,7 +102,7 @@ function prapre_test_env() {
 		packages=(
 			# basic
 			"make" "libbpf-dev" "clang" "git" "gcc" "jq" "capnproto"
-			# tcpretrans integration test deps
+			# tcpshark retransmit integration test deps
 			"iptables" "iproute2"
 		)
 		missing_packages=()

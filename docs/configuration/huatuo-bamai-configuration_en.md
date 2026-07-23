@@ -19,12 +19,12 @@ The configuration file uses **TOML** format and includes multiple sections such 
 
 ```bash
 # Global blacklist for tracing and metrics
-BlackList = ["netdev_hw", "metax_gpu"]
+BlackList = ["netdev_hw", "metax_gpu", "tcp_retrans"]
 ```
 
 - **BlackList**: Global blacklist for tracing and metrics.
 
-  Modules or hardware to exclude from tracing and metric collection. Default: `["netdev_hw", "metax_gpu"]`, which disables tracing and metrics for the network device hardware layer and Metax GPU. Supports arrays, extend as needed.
+  Modules or hardware to exclude from tracing and metric collection. The default list includes `tcp_retrans`, so TCP retransmission tracing and its drop-correlation cache are disabled. Remove `tcp_retrans` from the list and restart `huatuo-bamai` to enable them. Supports arrays, extend as needed.
 
 ### 3. Logging
 

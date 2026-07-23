@@ -34,9 +34,14 @@ import (
 
 type tcpRetransTracing struct{}
 
+const (
+	tcpRetransTracerName = "tcp_retrans"
+	tcpSharkToolName     = "tcpshark"
+)
+
 func init() {
-	tracing.RegisterEventTracing("tcp_retrans", newTCPRetrans)
-	toolstream.RegisterDefault[*types.TCPRetransTracing]("tcpretrans", handleTCPRetransEvent)
+	tracing.RegisterEventTracing(tcpRetransTracerName, newTCPRetrans)
+	toolstream.RegisterDefault[*types.TCPRetransTracing](tcpSharkToolName, handleTCPRetransEvent)
 }
 
 func newTCPRetrans() (*tracing.EventTracingAttr, error) {
@@ -47,10 +52,14 @@ func newTCPRetrans() (*tracing.EventTracingAttr, error) {
 	}, nil
 }
 
-// Start launches tcpretrans as a subprocess and waits for it to finish.
+// Start launches tcpshark in retransmit mode and waits for it to finish.
 // Events are received via the default toolstream server registered in init.
 func (c *tcpRetransTracing) Start(ctx context.Context) error {
+	globalDropCache.enable()
+	defer globalDropCache.disable()
+
 	args := []string{
+		"--mode", "retransmit",
 		"--bpf-path", path.Join(internalconfig.CoreBpfDir, "tcp_retrans.o"),
 		"--output-storage", toolstream.DefaultSockPath,
 	}
@@ -58,33 +67,36 @@ func (c *tcpRetransTracing) Start(ctx context.Context) error {
 	if cfg.TcpRetrans.Filter != "" {
 		args = append(args, "--filter", cfg.TcpRetrans.Filter)
 	}
+	if cfg.TcpRetrans.EnableTLP {
+		args = append(args, "--enable-tlp")
+	}
 
-	cmd := exec.Command(path.Join(internalconfig.CoreBinDir, "tcpretrans"), args...)
+	cmd := exec.Command(path.Join(internalconfig.CoreBinDir, "tcpshark"), args...)
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
-		return fmt.Errorf("start tcpretrans: stdout pipe: %w", err)
+		return fmt.Errorf("start tcpshark: stdout pipe: %w", err)
 	}
 	stderr, err := cmd.StderrPipe()
 	if err != nil {
-		return fmt.Errorf("start tcpretrans: stderr pipe: %w", err)
+		return fmt.Errorf("start tcpshark: stderr pipe: %w", err)
 	}
 	if err := cmd.Start(); err != nil {
-		return fmt.Errorf("start tcpretrans: %w", err)
+		return fmt.Errorf("start tcpshark: %w", err)
 	}
 	go func() {
 		scanner := bufio.NewScanner(stdout)
 		for scanner.Scan() {
-			log.Warnf("tcpretrans: %s", scanner.Text())
+			log.Warnf("tcpshark: %s", scanner.Text())
 		}
 	}()
 	go func() {
 		scanner := bufio.NewScanner(stderr)
 		for scanner.Scan() {
-			log.Warnf("tcpretrans: %s", scanner.Text())
+			log.Warnf("tcpshark: %s", scanner.Text())
 		}
 	}()
 
-	log.Infof("tcpretrans started pid=%d", cmd.Process.Pid)
+	log.Infof("tcpshark started pid=%d", cmd.Process.Pid)
 
 	done := make(chan error, 1)
 	go func() {
@@ -95,13 +107,13 @@ func (c *tcpRetransTracing) Start(ctx context.Context) error {
 	case <-ctx.Done():
 		_ = cmd.Process.Kill()
 		<-done
-		log.Info("tcpretrans stopped")
+		log.Info("tcpshark stopped")
 		return nil
 	case werr := <-done:
 		if werr != nil {
-			return fmt.Errorf("tcpretrans exited: %w", werr)
+			return fmt.Errorf("tcpshark exited: %w", werr)
 		}
-		log.Info("tcpretrans exited")
+		log.Info("tcpshark exited")
 		return nil
 	}
 }
@@ -121,7 +133,7 @@ func handleTCPRetransEvent(_ *toolstream.Session, ev *types.TCPRetransTracing) e
 	}
 
 	return tracing.Save(&tracing.WriteRequest{
-		TracerName:  "tcp_retrans",
+		TracerName:  tcpRetransTracerName,
 		ContainerID: ev.ContainerID,
 		TracerTime:  time.Now(),
 		TracerData:  ev,

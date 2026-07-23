@@ -1,5 +1,5 @@
 ---
-title: TCP Retransmission Tracing (tcpretrans)
+title: TCP Retransmission Tracing (tcpshark)
 type: docs
 description: Observe TCP retransmission-related kernel activity with eBPF, reason classification, and drop correlation
 author: HUATUO Team
@@ -9,9 +9,10 @@ weight: 5
 
 ## Overview
 
-`tcpretrans` observes TCP retransmission-related kernel activity through the
-`tcp/tcp_retransmit_skb` and `tcp/tcp_retransmit_synack` tracepoints. Depending
-on the event type, an event can include the IP 4-tuple, TCP state,
+`tcpshark --mode retransmit` observes TCP retransmission-related kernel activity
+through the `tcp/tcp_retransmit_skb` and `tcp/tcp_retransmit_synack`
+tracepoints. It can also observe the `tcp_send_loss_probe` kprobe when TLP
+collection is explicitly enabled. Depending on the event type, an event can include the IP 4-tuple, TCP state,
 congestion-control state, retransmission counters, sequence information, and
 socket metadata used for container resolution.
 
@@ -21,7 +22,7 @@ operational heuristics, not packet-loss root-cause proof.
 
 Filter expressions are compiled at load time by `internal/pcapfilter` and run
 in the kernel. Filters apply only to events that have an SKB
-(`tcp_retransmit_skb`); SYN-ACK events bypass the pcap filter.
+(`tcp_retransmit_skb`); SYN-ACK and TLP events bypass the pcap filter.
 
 ---
 
@@ -30,7 +31,7 @@ in the kernel. Filters apply only to events that have an SKB
 ### 1.1 Supported Expressions
 
 `internal/pcapfilter` uses the pure-Go go-pcap compiler and supports a subset
-of tcpdump syntax. The following expressions are useful for tcpretrans:
+of tcpdump syntax. The following expressions are useful for tcpshark:
 
 **Host**
 
@@ -74,11 +75,11 @@ can make an expression easier to read.
 | `tcp[tcpflags]`, `ip[8]`, `tcp[0:4]` | Byte-offset expressions are not supported by the current compiler. |
 | Bare `ip` or `ip6` | Do not rely on these expressions to distinguish the address family in an L3 view; use `host`, `net`, or a more specific TCP expression. |
 | `arp`, `ether host ...`, and other L2-only expressions | Not useful for TCP retransmission SKBs and may reject all L3 events or produce undefined L3 matches. |
-| `tcp_retransmit_synack` | No SKB is available to the BPF program, so `--filter` is not applied. |
+| `tcp_retransmit_synack` or `tcp_send_loss_probe` | No SKB is available to the BPF program, so `--filter` is not applied. |
 
 For complete syntax and limitations, refer to the `internal/pcapfilter`
 implementation. The event-coverage limitation above is specific to
-tcpretrans.
+tcpshark.
 
 ### 1.3 Recommended Expressions
 
@@ -97,20 +98,23 @@ tcpretrans.
 ```
 
 > `--filter` does not make the entire output stream match the expression:
-> `tcp_retransmit_synack` events are still emitted. For standalone JSON output,
+> `tcp_retransmit_synack` and enabled `tcp_send_loss_probe` events are still
+> emitted. For standalone JSON output,
 > use `jq` when all event types must be filtered by their formatted address and
 > port fields.
 
 ---
 
-## 2. Running tcpretrans
+## 2. Running tcpshark
 
 ```
-tcpretrans [flags]
+tcpshark --mode retransmit [flags]
 ```
 
 | Flag | Default | Description |
 |------|---------|-------------|
+| `--mode retransmit` | required | Select TCP retransmission tracing mode. |
+| `--enable-tlp`, `--tlp` | disabled | Also attach `tcp_send_loss_probe` and emit TLP events. |
 | `--bpf-path <path>` | required | Path to the `tcp_retrans.o` eBPF object file. |
 | `--filter <expr>` | (none) | tcpdump-style filter for `tcp_retransmit_skb` events; see §1. |
 | `--duration <n>` | 0 | Stop after N seconds (0 = run until Ctrl-C). |
@@ -125,24 +129,27 @@ When both `--output` and `--output-storage` are explicitly specified,
 
 ```bash
 # Text output for all retransmission-related events
-sudo tcpretrans --bpf-path bpf/tcp_retrans.o
+sudo tcpshark --mode retransmit --bpf-path bpf/tcp_retrans.o
 
 # NDJSON output
-sudo tcpretrans --bpf-path bpf/tcp_retrans.o --output json
+sudo tcpshark --mode retransmit --bpf-path bpf/tcp_retrans.o --output json
 
 # BPF-side filter for regular retransmitted SKBs to port 443
-sudo tcpretrans --bpf-path bpf/tcp_retrans.o --filter "dst port 443"
+sudo tcpshark --mode retransmit --bpf-path bpf/tcp_retrans.o --filter "dst port 443"
+
+# Include Tail Loss Probe events (disabled by default)
+sudo tcpshark --mode retransmit --enable-tlp --bpf-path bpf/tcp_retrans.o
 
 # Filter all formatted event types to destination port 443 in userspace
-sudo tcpretrans --bpf-path bpf/tcp_retrans.o --output json \
+sudo tcpshark --mode retransmit --bpf-path bpf/tcp_retrans.o --output json \
   | jq -c 'select(.dport == 443)'
 
 # Keep only events classified as RTO for 60 seconds
-sudo tcpretrans --bpf-path bpf/tcp_retrans.o --duration 60 --output json \
+sudo tcpshark --mode retransmit --bpf-path bpf/tcp_retrans.o --duration 60 --output json \
   | jq -c 'select(.reason == "RTO")'
 
 # Forward events to a running huatuo-bamai instance
-sudo tcpretrans --bpf-path bpf/tcp_retrans.o \
+sudo tcpshark --mode retransmit --bpf-path bpf/tcp_retrans.o \
   --output-storage /var/run/huatuo-toolstream.sock
 ```
 
@@ -172,8 +179,8 @@ Each event is an NDJSON object (`types.TCPRetransTracing`). Fields tagged with
 | `family` | uint16 | Address family (`2` = AF_INET, `10` = AF_INET6). |
 | `tcp_state` | string | TCP socket state, such as `ESTABLISHED`, `SYN_SENT`, or `NEW_SYN_RECV`. |
 | `phase` | string | Classifier output: `connect`, `data`, or `close`. |
-| `reason` | string | Classifier output: `RTO`, `fast_retransmit`, `reorder_prone_fast`, or `unknown`. |
-| `event_type` | string | `tcp_retransmit_skb` or `tcp_retransmit_synack`. |
+| `reason` | string | Classifier output: `RTO`, `fast_retransmit`, `reorder_prone_fast`, `TLP`, or `unknown`. |
+| `event_type` | string | `tcp_retransmit_skb`, `tcp_retransmit_synack`, or `tcp_send_loss_probe`. |
 | `ca_state` | uint8 | Congestion-control state: 0=Open, 1=Disorder, 2=CWR, 3=Recovery, 4=Loss. |
 | `icsk_retransmits` | uint8 | Current retransmission counter snapshot. |
 | `icsk_pending` | uint8 | Raw pending timer state from `inet_connection_sock`. |
@@ -211,8 +218,9 @@ the hook ran; use `container_id` and socket metadata for workload attribution.
 
 | Hook | Kernel location | What the event means | Data availability |
 |------|-----------------|----------------------|-------------------|
-| tracepoint `tcp/tcp_retransmit_skb` | `__tcp_retransmit_skb()` | A retransmission was attempted for a retransmission-queue SKB. The tcpretrans event does not retain the kernel transmit result. The SKB is headerless, so sequence fields come from `TCP_SKB_CB(skb)` and ACK comes from `tcp_sk(sk)->rcv_nxt`. | SKB pointer, TCP seq/end_seq/ack/flags, socket state, CA state, timers, and reorder counters. |
+| tracepoint `tcp/tcp_retransmit_skb` | `__tcp_retransmit_skb()` | A retransmission was attempted for a retransmission-queue SKB. The tcpshark event does not retain the kernel transmit result. The SKB is headerless, so sequence fields come from `TCP_SKB_CB(skb)` and ACK comes from `tcp_sk(sk)->rcv_nxt`. | SKB pointer, TCP seq/end_seq/ack/flags, socket state, CA state, timers, and reorder counters. |
 | tracepoint `tcp/tcp_retransmit_synack` | `tcp_rtx_synack()` | A passive-open SYN-ACK retransmission was successfully submitted by `tcp_rtx_synack()`. | Request-socket addresses and ports; no retransmission SKB pointer or TCP seq/ack. |
+| kprobe `tcp_send_loss_probe` | `tcp_send_loss_probe()` | A Tail Loss Probe is being prepared; collected only with `--enable-tlp`. | Socket metadata plus `snd_nxt`/`snd_una`; no SKB pointer or rendered TCP flags. |
 
 The BPF program uses CO-RE field reads (`BPF_CORE_READ` and related helpers),
 so supported kernel layouts do not require rebuilding the C source for each
@@ -246,7 +254,7 @@ sequenceDiagram
 ```
 
 The three solid arrows are the initial handshake packets and do not produce
-tcpretrans events. Only the retransmission paths inside the optional blocks are
+tcpshark events. Only the retransmission paths inside the optional blocks are
 observed. Active-open SYN retries are reported by `tcp_retransmit_skb`, while
 passive-open SYN-ACK retries are reported by `tcp_retransmit_synack`; both are
 classified as `connect`.
@@ -264,6 +272,7 @@ The complete phase mapping is:
 | Event or condition | Reason | Interpretation |
 |--------------------|--------|----------------|
 | `tcp_retransmit_synack` | `RTO` | Fixed userspace label for the SYN-ACK retry timer path. |
+| `tcp_send_loss_probe` | `TLP` | Fixed userspace label for the optional Tail Loss Probe hook. |
 | `tcp_retransmit_skb`, `ca_state=4` (Loss) | `RTO` | The socket is in TCP_CA_Loss. |
 | `tcp_retransmit_skb`, `ca_state=3` (Recovery) | `fast_retransmit` or `reorder_prone_fast` | Recovery-path retransmission; the reorder-prone label is selected when cumulative reorder history exists. |
 | `tcp_retransmit_skb`, `ca_state=0..2`, connect/close phase | `RTO` | Phase-based fallback used by the current classifier. |
@@ -286,13 +295,14 @@ not proof that the current retransmission was caused by reordering.
 
 ### Subprocess mode (default)
 
-huatuo-bamai launches `tcpretrans` as a child process and passes
+huatuo-bamai launches `tcpshark` as a child process and passes
 `--output-storage`, so events return through the built-in toolstream Unix
 socket. stdout and stderr are drained as logs; huatuo-bamai does not parse
 NDJSON from stdout in this mode. Typical arguments are:
 
 ```bash
-tcpretrans \
+tcpshark \
+  --mode retransmit \
   --bpf-path <CoreBpfDir>/tcp_retrans.o \
   --output-storage /var/run/huatuo-toolstream.sock \
   --filter "dst port 443"
@@ -304,7 +314,7 @@ and passes the event to the configured tracing storage backends through
 
 ### Direct event storage (`--output-storage`)
 
-`tcpretrans --output-storage <socket-path>` sends events to a running
+`tcpshark --mode retransmit --output-storage <socket-path>` sends events to a running
 huatuo-bamai instance over a Unix domain socket using the toolstream protocol.
 When `--output-storage` is set, `--output` is ignored. Container ID resolution
 is described in §6 and drop correlation in §7.
@@ -313,13 +323,22 @@ is described in §6 and drop correlation in §7.
 
 ```toml
 [EventTracing.TcpRetrans]
-    # Forwarded to tcpretrans --filter.
+    # Forwarded to tcpshark --filter.
     # Applies only to tcp_retransmit_skb events; see §1.2.
     # Default: ""
     Filter = ""
+
+    # Forwarded as tcpshark --enable-tlp. Default: false.
+    EnableTLP = false
 ```
 
-Start or stop the tracer through the HTTP API:
+The `tcp_retrans` tracer is in the global `BlackList` by default. Remove it
+from the list and restart huatuo-bamai to enable the tracer. Its
+drop-correlation cache is enabled only while the tracer is running and is
+cleared when the tracer stops.
+
+After `tcp_retrans` is no longer blacklisted, start or stop it through the HTTP
+API:
 
 ```bash
 curl -X PUT http://localhost:19704/tracers/tcp_retrans/start
@@ -330,7 +349,7 @@ curl -X PUT http://localhost:19704/tracers/tcp_retrans/stop
 
 ## 6. Container ID Resolution
 
-`tcpretrans` itself has no access to the Pod manager. Container ID is resolved
+`tcpshark` itself has no access to the Pod manager. Container ID is resolved
 by huatuo-bamai:
 
 | Mode | Behavior |
@@ -346,9 +365,9 @@ because they describe the hook execution context.
 
 ## 7. Drop Correlation Heuristic (`drop_location`)
 
-When dropwatch and tcpretrans feed the same huatuo-bamai process, dropwatch
+When dropwatch and tcpshark feed the same huatuo-bamai process, dropwatch
 events are retained in a userspace cache for two seconds from their arrival
-time. A tcpretrans event immediately queries previously received, unexpired
+time. A tcpshark event immediately queries previously received, unexpired
 drop events using a direction-independent connection key. The implementation
 does not wait for later drop events and does not revise an event after storage.
 
@@ -377,7 +396,7 @@ identical address/port tuples in different network namespaces can also collide.
 | `drop_location` absent | Expected in standalone output; correlation is performed by huatuo-bamai, not the CLI. |
 
 For reliable negative evidence, dropwatch must be active with a filter that is
-at least as broad as the tcpretrans traffic of interest. The current schema has
+at least as broad as the tcpshark traffic of interest. The current schema has
 no separate `unknown` or `dropwatch_not_observed` value, so consumers should
 treat `network_or_host_hardware` as an investigation hint rather than a fact.
 
@@ -393,6 +412,7 @@ service-impact thresholds over filtering solely by `event_type` or `reason`.
 | `reason=RTO` | High | Investigate sustained or service-correlated increases; RTO normally has greater latency impact than Recovery-path retransmission. |
 | `reason=fast_retransmit` | Medium | Correlate with loss, congestion, and SACK/RACK behavior. |
 | `reason=reorder_prone_fast` | Context dependent | The flow has prior reorder history, but the current event is not proven spurious; inspect latency and counter growth. |
+| `reason=TLP` | Context dependent | Optional signal only; confirm that TLP collection was deliberately enabled before using it in alerting. |
 | `event_type=tcp_retransmit_synack` | Usually low per isolated retry | Repeated events can indicate handshake reachability, host egress, firewall, or client/network problems. |
 
 When building alerts, aggregate by service/connection and compare against

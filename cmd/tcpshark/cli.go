@@ -23,6 +23,8 @@ import (
 )
 
 const (
+	cliFlagMode          = "mode"
+	cliFlagEnableTLP     = "enable-tlp"
 	cliFlagBpfPath       = "bpf-path"
 	cliFlagFilter        = "filter"
 	cliFlagDuration      = "duration"
@@ -32,6 +34,8 @@ const (
 )
 
 const (
+	modeRetransmit = "retransmit"
+
 	outputText = "text"
 	outputJSON = "json"
 )
@@ -39,8 +43,18 @@ const (
 func appFlags() []cli.Flag {
 	return []cli.Flag{
 		&cli.StringFlag{
+			Name:     cliFlagMode,
+			Usage:    "capture mode: retransmit",
+			Required: true,
+		},
+		&cli.BoolFlag{
+			Name:    cliFlagEnableTLP,
+			Aliases: []string{"tlp"},
+			Usage:   "include Tail Loss Probe events in retransmit mode",
+		},
+		&cli.StringFlag{
 			Name:     cliFlagBpfPath,
-			Usage:    "path to the tcpretrans BPF object file",
+			Usage:    "path to the BPF object file for the selected mode",
 			Required: true,
 		},
 		&cli.StringFlag{
@@ -68,6 +82,9 @@ func appFlags() []cli.Flag {
 }
 
 func validateFlags(c *cli.Context) error {
+	if mode := c.String(cliFlagMode); mode != modeRetransmit {
+		return fmt.Errorf("--mode: invalid value %q, want %s", mode, modeRetransmit)
+	}
 	if v := c.String(cliFlagOutput); v != outputJSON && v != outputText {
 		return fmt.Errorf("--output: invalid value %q, want json or text", v)
 	}

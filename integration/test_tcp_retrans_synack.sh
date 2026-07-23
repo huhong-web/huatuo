@@ -5,20 +5,20 @@ set -euo pipefail
 source "$(dirname "$0")/env.sh"
 source "${ROOT_DIR}/integration/lib.sh"
 
-TCPRETRANS_BIN="${ROOT_DIR}/_output/bin/tcpretrans"
+TCPSHARK_BIN="${ROOT_DIR}/_output/bin/tcpshark"
 BPF_OBJ="${ROOT_DIR}/_output/bpf/tcp_retrans.o"
 OUTPUT_DIR=$(mktemp -d /tmp/tcp_retrans_synack.XXXXXX)
 TEST_PORT=19994
 
-[[ -x "${TCPRETRANS_BIN}" ]] || fatal "tcpretrans binary not found: ${TCPRETRANS_BIN}"
+[[ -x "${TCPSHARK_BIN}" ]] || fatal "tcpshark binary not found: ${TCPSHARK_BIN}"
 [[ -f "${BPF_OBJ}" ]] || fatal "BPF object not found: ${BPF_OBJ}"
 require_nc
 
 cleanup() {
-	[[ -n "${TCPRETRANS_PID:-}" ]] && kill "${TCPRETRANS_PID}" 2> /dev/null || true
+	[[ -n "${TCPSHARK_PID:-}" ]] && kill "${TCPSHARK_PID}" 2> /dev/null || true
 	[[ -n "${NC_PID:-}" ]] && kill "${NC_PID}" 2> /dev/null || true
 	sleep 0.2
-	[[ -n "${TCPRETRANS_PID:-}" ]] && kill -9 "${TCPRETRANS_PID}" 2> /dev/null || true
+	[[ -n "${TCPSHARK_PID:-}" ]] && kill -9 "${TCPSHARK_PID}" 2> /dev/null || true
 	iptables -D OUTPUT -p tcp --dport "${TEST_PORT}" --tcp-flags SYN,ACK ACK -j DROP 2> /dev/null || true
 	rm -rf "${OUTPUT_DIR}"
 }
@@ -38,9 +38,9 @@ sleep 0.5
 iptables -I OUTPUT 1 -p tcp --dport "${TEST_PORT}" --tcp-flags SYN,ACK ACK -j DROP
 log_info "iptables: DROP pure ACK (dport=${TEST_PORT})"
 
-# 3. Start tcpretrans.
-"${TCPRETRANS_BIN}" --bpf-path "${BPF_OBJ}" --duration 8 --output json > "${OUTPUT_DIR}/events.json" 2> "${OUTPUT_DIR}/stderr.log" &
-TCPRETRANS_PID=$!
+# 3. Start tcpshark in retransmit mode.
+"${TCPSHARK_BIN}" --mode retransmit --bpf-path "${BPF_OBJ}" --duration 8 --output json > "${OUTPUT_DIR}/events.json" 2> "${OUTPUT_DIR}/stderr.log" &
+TCPSHARK_PID=$!
 sleep 1
 
 # 4. Client connects: SYN → server, SYNACK → client, ACK → dropped.
@@ -49,9 +49,9 @@ timeout 3 bash -c "exec 3<>/dev/tcp/127.0.0.1/${TEST_PORT}" 2> /dev/null || true
 # 5. Wait for SYNACK retransmissions (initial RTO ~1s, exponential backoff).
 sleep 5
 
-kill "${TCPRETRANS_PID}" 2> /dev/null || true
+kill "${TCPSHARK_PID}" 2> /dev/null || true
 sleep 0.3
-TCPRETRANS_PID=""
+TCPSHARK_PID=""
 
 SYNACK_COUNT=$(grep -c '"event_type":"tcp_retransmit_synack"' "${OUTPUT_DIR}/events.json" 2> /dev/null || true)
 SYNACK_COUNT=${SYNACK_COUNT:-0}

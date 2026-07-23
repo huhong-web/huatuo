@@ -189,8 +189,24 @@ func TestPhaseAndReasonStrings(t *testing.T) {
 		}
 	}
 
-	reasons := []RetransReason{RetransReasonRTO, RetransReasonFast, RetransReasonReorderProneFast, RetransReasonSpurious, RetransReasonUnknown, RetransReason(99)}
-	wantReasonStrs := []string{"RTO", "fast_retransmit", "reorder_prone_fast", "spurious", "unknown", "unknown"}
+	reasons := []RetransReason{
+		RetransReasonRTO,
+		RetransReasonFast,
+		RetransReasonReorderProneFast,
+		RetransReasonTLP,
+		RetransReasonSpurious,
+		RetransReasonUnknown,
+		RetransReason(99),
+	}
+	wantReasonStrs := []string{
+		"RTO",
+		"fast_retransmit",
+		"reorder_prone_fast",
+		"TLP",
+		"spurious",
+		"unknown",
+		"unknown",
+	}
 	for i, r := range reasons {
 		if s := r.String(); s != wantReasonStrs[i] {
 			t.Errorf("reason %d: got %q, want %q", r, s, wantReasonStrs[i])

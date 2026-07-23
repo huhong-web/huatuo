@@ -128,6 +128,29 @@ func TestFormatEventTCPFlags(t *testing.T) {
 	}
 }
 
+func TestFormatEventTLP(t *testing.T) {
+	t.Parallel()
+
+	event := formatEvent(&retransEvent{
+		EventType: retransEventTLP,
+		TCPSeq:    123,
+		TCPAck:    100,
+	})
+
+	if event.EventType != "tcp_send_loss_probe" {
+		t.Errorf("EventType = %q, want tcp_send_loss_probe", event.EventType)
+	}
+	if event.Phase != "data" {
+		t.Errorf("Phase = %q, want data", event.Phase)
+	}
+	if event.Reason != "TLP" {
+		t.Errorf("Reason = %q, want TLP", event.Reason)
+	}
+	if event.TCPSeq != 123 || event.TCPAck != 100 {
+		t.Errorf("sequence fields = (%d, %d), want (123, 100)", event.TCPSeq, event.TCPAck)
+	}
+}
+
 func TestTextWriterFormatsTCPFlags(t *testing.T) {
 	t.Parallel()
 

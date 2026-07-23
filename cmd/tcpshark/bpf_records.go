@@ -23,6 +23,7 @@ import (
 const (
 	retransEventSKU    = 1
 	retransEventSynack = 2
+	retransEventTLP    = 3
 )
 
 type retransEvent struct {

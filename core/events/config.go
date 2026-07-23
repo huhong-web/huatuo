@@ -41,7 +41,8 @@ type Config struct {
 	}
 
 	TcpRetrans struct {
-		Filter string `default:""`
+		Filter    string `default:""`
+		EnableTLP bool   `default:"false"`
 	}
 
 	Netdev struct {
