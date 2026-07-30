@@ -40,9 +40,10 @@ type Config struct {
 		ExcludeContainers  []string
 	}
 
-	TcpRetrans struct {
-		Filter    string `default:""`
-		EnableTLP bool   `default:"false"`
+	TCPRetransmit struct {
+		Filter             string `default:""`
+		EnableTLP          bool   `default:"false"`
+		MaxEventsPerSecond uint64 `default:"100"`
 	}
 
 	Netdev struct {

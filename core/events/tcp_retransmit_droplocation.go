@@ -103,13 +103,13 @@ func BuildRetransCorrelationReport(drop *types.DropWatchTracing, retrans *types.
 		return "DROP caused RETRANS directly (same sk_buff): " +
 			retrans.Saddr + ":" + fmtU16(retrans.Sport) + " > " +
 			retrans.Daddr + ":" + fmtU16(retrans.Dport) +
-			" phase=" + retrans.Phase + " reason=" + retrans.Reason
+			" phase=" + retrans.Phase + " tcp_reason=" + retrans.TCPReason
 
 	case RetransDrop5Tuple:
 		return "DROP and RETRANS share same connection: " +
 			retrans.Saddr + ":" + fmtU16(retrans.Sport) + " > " +
 			retrans.Daddr + ":" + fmtU16(retrans.Dport) +
-			" phase=" + retrans.Phase + " reason=" + retrans.Reason
+			" phase=" + retrans.Phase + " tcp_reason=" + retrans.TCPReason
 
 	default:
 		return ""

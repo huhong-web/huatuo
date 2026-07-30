@@ -15,38 +15,38 @@
 package events
 
 import (
-	"bufio"
 	"context"
+	"errors"
 	"fmt"
-	"os/exec"
 	"path"
+	"strconv"
 	"time"
 
 	internalconfig "huatuo-bamai/internal/config"
-	"huatuo-bamai/internal/log"
 	"huatuo-bamai/internal/pod"
+	executil "huatuo-bamai/internal/profiler/exec"
 	"huatuo-bamai/internal/toolstream"
 	"huatuo-bamai/pkg/tracing"
 	"huatuo-bamai/pkg/types"
 )
 
-//go:generate $BPF_COMPILE $BPF_INCLUDE -s $BPF_DIR/tcpshark.c -o $BPF_DIR/tcpshark.o
+//go:generate $BPF_COMPILE $BPF_INCLUDE -s $BPF_DIR/tcp_retransmit.c -o $BPF_DIR/tcp_retransmit.o
 
-type tcpRetransTracing struct{}
+type tcpRetransmitTracing struct{}
 
 const (
-	tcpRetransTracerName = "tcp_retrans"
-	tcpSharkToolName     = "tcpshark"
+	tcpRetransmitTracerName = "tcp_retransmit"
+	tcpSharkToolName        = "tcpshark"
 )
 
 func init() {
-	tracing.RegisterEventTracing(tcpRetransTracerName, newTCPRetrans)
+	tracing.RegisterEventTracing(tcpRetransmitTracerName, newTCPRetransmit)
 	toolstream.RegisterDefault[*types.TCPRetransTracing](tcpSharkToolName, handleTCPRetransEvent)
 }
 
-func newTCPRetrans() (*tracing.EventTracingAttr, error) {
+func newTCPRetransmit() (*tracing.EventTracingAttr, error) {
 	return &tracing.EventTracingAttr{
-		TracingData: &tcpRetransTracing{},
+		TracingData: &tcpRetransmitTracing{},
 		Interval:    10,
 		Flag:        tracing.FlagTracing,
 	}, nil
@@ -54,68 +54,32 @@ func newTCPRetrans() (*tracing.EventTracingAttr, error) {
 
 // Start launches tcpshark in retransmit mode and waits for it to finish.
 // Events are received via the default toolstream server registered in init.
-func (c *tcpRetransTracing) Start(ctx context.Context) error {
+func (c *tcpRetransmitTracing) Start(ctx context.Context) error {
 	globalDropCache.enable()
 	defer globalDropCache.disable()
 
 	args := []string{
 		"--mode", "retransmit",
-		"--bpf-path", path.Join(internalconfig.CoreBpfDir, "tcpshark.o"),
+		"--bpf-path", path.Join(internalconfig.CoreBpfDir, "tcp_retransmit.o"),
 		"--output-storage", toolstream.DefaultSockPath,
+		"--max-events-per-second", strconv.FormatUint(cfg.TCPRetransmit.MaxEventsPerSecond, 10),
 	}
 
-	if cfg.TcpRetrans.Filter != "" {
-		args = append(args, "--filter", cfg.TcpRetrans.Filter)
+	if cfg.TCPRetransmit.Filter != "" {
+		args = append(args, "--filter", cfg.TCPRetransmit.Filter)
 	}
-	if cfg.TcpRetrans.EnableTLP {
+	if cfg.TCPRetransmit.EnableTLP {
 		args = append(args, "--enable-tlp")
 	}
 
-	cmd := exec.Command(path.Join(internalconfig.CoreBinDir, "tcpshark"), args...)
-	stdout, err := cmd.StdoutPipe()
-	if err != nil {
-		return fmt.Errorf("start tcpshark: stdout pipe: %w", err)
-	}
-	stderr, err := cmd.StderrPipe()
-	if err != nil {
-		return fmt.Errorf("start tcpshark: stderr pipe: %w", err)
-	}
-	if err := cmd.Start(); err != nil {
-		return fmt.Errorf("start tcpshark: %w", err)
-	}
-	go func() {
-		scanner := bufio.NewScanner(stdout)
-		for scanner.Scan() {
-			log.Warnf("tcpshark: %s", scanner.Text())
-		}
-	}()
-	go func() {
-		scanner := bufio.NewScanner(stderr)
-		for scanner.Scan() {
-			log.Warnf("tcpshark: %s", scanner.Text())
-		}
-	}()
-
-	log.Infof("tcpshark started pid=%d", cmd.Process.Pid)
-
-	done := make(chan error, 1)
-	go func() {
-		done <- cmd.Wait()
-	}()
-
-	select {
-	case <-ctx.Done():
-		_ = cmd.Process.Kill()
-		<-done
-		log.Info("tcpshark stopped")
-		return nil
-	case werr := <-done:
-		if werr != nil {
-			return fmt.Errorf("tcpshark exited: %w", werr)
-		}
-		log.Info("tcpshark exited")
+	result := executil.ExecCmd(ctx, 0, path.Join(internalconfig.CoreBinDir, tcpSharkToolName), args...)
+	if errors.Is(result.CmdErr, context.Canceled) {
 		return nil
 	}
+	if result.CmdErr != nil {
+		return fmt.Errorf("run %s: %w", tcpSharkToolName, executil.VerifyResults([]executil.CmdResult{result}))
+	}
+	return nil
 }
 
 func handleTCPRetransEvent(_ *toolstream.Session, ev *types.TCPRetransTracing) error {
@@ -133,7 +97,7 @@ func handleTCPRetransEvent(_ *toolstream.Session, ev *types.TCPRetransTracing) e
 	}
 
 	return tracing.Save(&tracing.WriteRequest{
-		TracerName:  tcpRetransTracerName,
+		TracerName:  tcpRetransmitTracerName,
 		ContainerID: ev.ContainerID,
 		TracerTime:  time.Now(),
 		TracerData:  ev,
