@@ -20,7 +20,7 @@ source "$(dirname "$0")/env.sh"
 source "${ROOT_DIR}/integration/lib.sh"
 
 TCPSHARK_BIN="${ROOT_DIR}/_output/bin/tcpshark"
-BPF_OBJ="${ROOT_DIR}/_output/bpf/tcpshark.o"
+BPF_OBJ="${ROOT_DIR}/_output/bpf/tcp_retransmit.o"
 OUTPUT_DIR=$(mktemp -d /tmp/tcp_retrans_tlp.XXXXXX)
 TEST_PORT=19996
 PAYLOAD_SIZE=262144 # 256 KB
@@ -30,12 +30,12 @@ PAYLOAD_SIZE=262144 # 256 KB
 require_nc
 
 cleanup() {
-	[[ -n "${TCPSHARK_PID:-}" ]] && kill "${TCPSHARK_PID}" 2> /dev/null || true
-	[[ -n "${SRV_PID:-}" ]] && kill "${SRV_PID}" 2> /dev/null || true
-	[[ -n "${CLI_PID:-}" ]] && kill "${CLI_PID}" 2> /dev/null || true
+	[[ -n "${TCPSHARK_PID:-}" ]] && kill "${TCPSHARK_PID}" 2>/dev/null || true
+	[[ -n "${SRV_PID:-}" ]] && kill "${SRV_PID}" 2>/dev/null || true
+	[[ -n "${CLI_PID:-}" ]] && kill "${CLI_PID}" 2>/dev/null || true
 	sleep 0.2
-	[[ -n "${TCPSHARK_PID:-}" ]] && kill -9 "${TCPSHARK_PID}" 2> /dev/null || true
-	iptables -D OUTPUT -p tcp --dport "${TEST_PORT}" --tcp-flags ACK ACK -j DROP 2> /dev/null || true
+	[[ -n "${TCPSHARK_PID:-}" ]] && kill -9 "${TCPSHARK_PID}" 2>/dev/null || true
+	iptables -D OUTPUT -p tcp --dport "${TEST_PORT}" --tcp-flags ACK ACK -j DROP 2>/dev/null || true
 	rm -rf "${OUTPUT_DIR}"
 }
 trap cleanup EXIT
@@ -48,18 +48,18 @@ log_info "TLP: tcp_send_loss_probe via host iptables (drop data ACKs) + nc"
 (
 	sleep 3
 	head -c "${PAYLOAD_SIZE}" /dev/zero
-) | timeout 14 $(nc_listen_cmd "127.0.0.1" "${TEST_PORT}") > /dev/null 2>&1 &
+) | timeout 14 $(nc_listen_cmd "127.0.0.1" "${TEST_PORT}") >/dev/null 2>&1 &
 SRV_PID=$!
 sleep 0.5
 
 # 2. Start tcpshark with TLP collection explicitly enabled.
 "${TCPSHARK_BIN}" --mode retransmit --enable-tlp --bpf-path "${BPF_OBJ}" \
-	--duration 14 --output json > "${OUTPUT_DIR}/events.json" 2> "${OUTPUT_DIR}/stderr.log" &
+	--duration 14 --output json >"${OUTPUT_DIR}/events.json" 2>"${OUTPUT_DIR}/stderr.log" &
 TCPSHARK_PID=$!
 sleep 0.5
 
 # 3. Client connects via bash /dev/tcp and reads data to /dev/null.
-timeout 12 bash -c "exec 3<>/dev/tcp/127.0.0.1/${TEST_PORT}; cat <&3 >/dev/null" 2> /dev/null &
+timeout 12 bash -c "exec 3<>/dev/tcp/127.0.0.1/${TEST_PORT}; cat <&3 >/dev/null" 2>/dev/null &
 CLI_PID=$!
 
 # 4. Wait for handshake to complete, then drop ACKs to the server.
@@ -71,26 +71,26 @@ log_info "iptables: DROP ACK (dport=${TEST_PORT}) — client ACKs will be droppe
 # 5. Wait for data send + TLP (PTO ~10ms on loopback; generous window).
 sleep 10
 
-kill "${TCPSHARK_PID}" 2> /dev/null || true
+kill "${TCPSHARK_PID}" 2>/dev/null || true
 sleep 0.3
 TCPSHARK_PID=""
 
 # Filter events for our test port (server-side sport).
-grep "\"sport\":${TEST_PORT}" "${OUTPUT_DIR}/events.json" > "${OUTPUT_DIR}/filtered.json" 2> /dev/null || true
+grep "\"sport\":${TEST_PORT}" "${OUTPUT_DIR}/events.json" >"${OUTPUT_DIR}/filtered.json" 2>/dev/null || true
 
-TLP_COUNT=$(grep -c '"event_type":"tcp_send_loss_probe"' "${OUTPUT_DIR}/filtered.json" 2> /dev/null || true)
+TLP_COUNT=$(grep -c '"event_type":"tcp_send_loss_probe"' "${OUTPUT_DIR}/filtered.json" 2>/dev/null || true)
 TLP_COUNT=${TLP_COUNT:-0}
-TLP_REASON=$(grep '"event_type":"tcp_send_loss_probe"' "${OUTPUT_DIR}/filtered.json" 2> /dev/null | grep -c '"reason":"TLP"' || true)
+TLP_REASON=$(grep '"event_type":"tcp_send_loss_probe"' "${OUTPUT_DIR}/filtered.json" 2>/dev/null | grep -c '"tcp_reason":"TLP"' || true)
 TLP_REASON=${TLP_REASON:-0}
 
-log_info "TLP events: ${TLP_COUNT}, reason=TLP: ${TLP_REASON}"
+log_info "TLP events: ${TLP_COUNT}, tcp_reason=TLP: ${TLP_REASON}"
 
 if ((TLP_COUNT >= 1)) && ((TLP_REASON >= 1)); then
-	log_info "PASS: tcp_send_loss_probe events detected with reason=TLP"
+	log_info "PASS: tcp_send_loss_probe events detected with tcp_reason=TLP"
 elif ((TLP_COUNT == 0)); then
 	log_info "SKIP: no TLP events (kernel may not have sent loss probe in this scenario)"
 else
 	log_error "FAIL: TLP events found but reason mismatch"
-	grep '"event_type":"tcp_send_loss_probe"' "${OUTPUT_DIR}/filtered.json" 2> /dev/null || true
+	grep '"event_type":"tcp_send_loss_probe"' "${OUTPUT_DIR}/filtered.json" 2>/dev/null || true
 	fatal "TLP test failed"
 fi

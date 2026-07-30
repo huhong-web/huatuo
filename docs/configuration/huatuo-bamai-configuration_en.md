@@ -19,12 +19,12 @@ The configuration file uses **TOML** format and includes multiple sections such 
 
 ```bash
 # Global blacklist for tracing and metrics
-BlackList = ["netdev_hw", "metax_gpu", "tcp_retrans"]
+BlackList = ["netdev_hw", "metax_gpu", "ascend_npu", "tcp_retransmit"]
 ```
 
 - **BlackList**: Global blacklist for tracing and metrics.
 
-  Modules or hardware to exclude from tracing and metric collection. The default list includes `tcp_retrans`, so TCP retransmission tracing and its drop-correlation cache are disabled. Remove `tcp_retrans` from the list and restart `huatuo-bamai` to enable them. Supports arrays, extend as needed.
+  Modules or hardware to exclude from tracing and metric collection. The default list includes `tcp_retransmit`, so TCP retransmission tracing and its drop-correlation cache are disabled. Remove `tcp_retransmit` from the list and restart `huatuo-bamai` to enable them. Supports arrays, extend as needed.
 
 ### 3. Logging
 
@@ -743,7 +743,37 @@ This section is responsible for capturing key kernel events and monitoring laten
 
   **Description**: Neighbor table related drops are usually normal behavior; excluding them reduces false positives.
 
-#### 7.6 Hardware Error Event Tracing (EventTracing.Ras)
+#### 7.6 TCP Retransmission Tracing ([EventTracing.TCPRetransmit])
+
+```bash
+[EventTracing.TCPRetransmit]
+    # Forwarded to tcpshark --filter.
+    # Applies only to tcp_retransmit_skb events.
+    # Default: ""
+    Filter = ""
+
+    # Forwarded as tcpshark --enable-tlp. Default: false.
+    EnableTLP = false
+
+    # Forwarded as tcpshark --max-events-per-second.
+    # Default: 100; 0 disables rate limiting.
+    MaxEventsPerSecond = 100
+```
+
+- **Filter**: tcpdump-style filter expression passed to `tcpshark --filter`.
+
+  Default: empty string. It applies only to `tcp_retransmit_skb` events.
+
+- **EnableTLP**: Whether to collect `tcp_send_loss_probe` events.
+
+  Default: false.
+
+- **MaxEventsPerSecond**: Maximum TCP retransmission events emitted by BPF per second.
+
+  Default: 100. Set to 0 for unlimited output. When the limit is exceeded,
+  `tcpshark` logs `rate limit hit`.
+
+#### 7.7 Hardware Error Event Tracing (EventTracing.Ras)
 
 ```bash
 # ras

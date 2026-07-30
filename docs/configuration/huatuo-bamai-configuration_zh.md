@@ -19,12 +19,12 @@ weight: 4
 
 ```bash
 # The global blacklist for tracing and metrics
-BlackList = ["netdev_hw", "metax_gpu", "tcp_retrans"]
+BlackList = ["netdev_hw", "metax_gpu", "ascend_npu", "tcp_retransmit"]
 ```
 
 - **BlackList**：全局追踪与指标黑名单。 
 
-  用于排除特定模块或追踪和指标采集，避免无关噪声或高开销探针。默认名单包含 `tcp_retrans`，因此 TCP 重传追踪及其丢包关联缓存默认关闭；从名单中移除 `tcp_retrans` 并重启 `huatuo-bamai` 后才会启用。
+  用于排除特定模块或追踪和指标采集，避免无关噪声或高开销探针。默认名单包含 `tcp_retransmit`，因此 TCP 重传追踪及其丢包关联缓存默认关闭；从名单中移除 `tcp_retransmit` 并重启 `huatuo-bamai` 后才会启用。
 
   **说明**：添加黑名单项可有效降低资源消耗，尤其在特定硬件环境中；支持数组格式，可根据实际业务扩展。
 
@@ -742,7 +742,36 @@ IssuesList = []
 
   **说明**：邻居表相关丢包通常为正常行为，排除可减少误报。
 
-#### 7.6 硬件错误事件追踪（EventTracing.Ras）
+#### 7.6 TCP 重传追踪（[EventTracing.TCPRetransmit]）
+
+```bash
+[EventTracing.TCPRetransmit]
+    # Forwarded to tcpshark --filter.
+    # Only tcp_retransmit_skb events are filtered.
+    # Default: ""
+    Filter = ""
+
+    # Forwarded as tcpshark --enable-tlp. Default: false.
+    EnableTLP = false
+
+    # Forwarded as tcpshark --max-events-per-second.
+    # Default: 100; 0 disables rate limiting.
+    MaxEventsPerSecond = 100
+```
+
+- **Filter**：传给 `tcpshark --filter` 的 tcpdump 风格过滤表达式。
+
+  默认空字符串。仅过滤 `tcp_retransmit_skb` 事件。
+
+- **EnableTLP**：是否采集 `tcp_send_loss_probe` 事件。
+
+  默认 false。
+
+- **MaxEventsPerSecond**：BPF 侧每秒最多输出的 TCP 重传事件数。
+
+  默认 100，设置为 0 表示不限速。超限时 `tcpshark` 会输出 `rate limit hit` 日志。
+
+#### 7.7 硬件错误事件追踪（EventTracing.Ras）
 
 ```bash
 # ras

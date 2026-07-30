@@ -115,9 +115,10 @@ tcpshark --mode retransmit [flags]
 |------|---------|-------------|
 | `--mode retransmit` | required | Select TCP retransmission tracing mode. |
 | `--enable-tlp`, `--tlp` | disabled | Also attach `tcp_send_loss_probe` and emit TLP events. |
-| `--bpf-path <path>` | required | Path to the `tcpshark.o` eBPF object file. |
+| `--bpf-path <path>` | required | Path to the `tcp_retransmit.o` eBPF object file. |
 | `--filter <expr>` | (none) | tcpdump-style filter for `tcp_retransmit_skb` events; see §1. |
 | `--duration <n>` | 0 | Stop after N seconds (0 = run until Ctrl-C). |
+| `--max-events-per-second <n>` | 0 | BPF-side event rate limit; 0 means unlimited. |
 | `--output <json\|text>` | `text` | Output format; ignored when `--output-storage` is set. |
 | `--output-storage <path>` | (none) | Send events to huatuo-bamai over a Unix socket. |
 | `--task-id <id>` | (none) | Task ID associated with the toolstream session; effective with `--output-storage`. |
@@ -129,27 +130,31 @@ When both `--output` and `--output-storage` are explicitly specified,
 
 ```bash
 # Text output for all retransmission-related events
-sudo tcpshark --mode retransmit --bpf-path bpf/tcpshark.o
+sudo tcpshark --mode retransmit --bpf-path bpf/tcp_retransmit.o
 
 # NDJSON output
-sudo tcpshark --mode retransmit --bpf-path bpf/tcpshark.o --output json
+sudo tcpshark --mode retransmit --bpf-path bpf/tcp_retransmit.o --output json
 
 # BPF-side filter for regular retransmitted SKBs to port 443
-sudo tcpshark --mode retransmit --bpf-path bpf/tcpshark.o --filter "dst port 443"
+sudo tcpshark --mode retransmit --bpf-path bpf/tcp_retransmit.o --filter "dst port 443"
 
 # Include Tail Loss Probe events (disabled by default)
-sudo tcpshark --mode retransmit --enable-tlp --bpf-path bpf/tcpshark.o
+sudo tcpshark --mode retransmit --enable-tlp --bpf-path bpf/tcp_retransmit.o
+
+# Emit at most 100 events/second; overflow prints a rate limit hit log
+sudo tcpshark --mode retransmit --bpf-path bpf/tcp_retransmit.o \
+  --max-events-per-second 100
 
 # Filter all formatted event types to destination port 443 in userspace
-sudo tcpshark --mode retransmit --bpf-path bpf/tcpshark.o --output json \
+sudo tcpshark --mode retransmit --bpf-path bpf/tcp_retransmit.o --output json \
   | jq -c 'select(.dport == 443)'
 
 # Keep only events classified as RTO for 60 seconds
-sudo tcpshark --mode retransmit --bpf-path bpf/tcpshark.o --duration 60 --output json \
-  | jq -c 'select(.reason == "RTO")'
+sudo tcpshark --mode retransmit --bpf-path bpf/tcp_retransmit.o --duration 60 --output json \
+  | jq -c 'select(.tcp_reason == "RTO")'
 
 # Forward events to a running huatuo-bamai instance
-sudo tcpshark --mode retransmit --bpf-path bpf/tcpshark.o \
+sudo tcpshark --mode retransmit --bpf-path bpf/tcp_retransmit.o \
   --output-storage /var/run/huatuo-toolstream.sock
 ```
 
@@ -176,10 +181,9 @@ Each event is an NDJSON object (`types.TCPRetransTracing`). Fields tagged with
 | `daddr` | string | Destination IP address. |
 | `sport` | uint16 | Source port. |
 | `dport` | uint16 | Destination port. |
-| `family` | uint16 | Address family (`2` = AF_INET, `10` = AF_INET6). |
 | `tcp_state` | string | TCP socket state, such as `ESTABLISHED`, `SYN_SENT`, or `NEW_SYN_RECV`. |
 | `phase` | string | Classifier output: `connect`, `data`, or `close`. |
-| `reason` | string | Classifier output: `RTO`, `fast_retransmit`, `reorder_prone_fast`, `TLP`, or `unknown`. |
+| `tcp_reason` | string | Classifier output: `RTO`, `fast_retransmit`, `reorder_prone_fast`, `TLP`, or `unknown`. |
 | `event_type` | string | `tcp_retransmit_skb`, `tcp_retransmit_synack`, or `tcp_send_loss_probe`. |
 | `ca_state` | uint8 | Congestion-control state: 0=Open, 1=Disorder, 2=CWR, 3=Recovery, 4=Loss. |
 | `icsk_retransmits` | uint8 | Current retransmission counter snapshot. |
@@ -192,7 +196,7 @@ Each event is an NDJSON object (`types.TCPRetransTracing`). Fields tagged with
 | `tcp_flags` | string | Rendered TCP flag set such as `SYN|ACK` or `ACK|PSH`; SKB events use `TCP_SKB_CB(skb)->tcp_flags`, and SYN-ACK events derive it from the event type. |
 | `skb_addr` | string | Retransmission-queue SKB pointer in hex; absent for SYN-ACK events. |
 | `drop_location` | string | huatuo-bamai correlation heuristic; see §7. |
-| `source` | string | Optional source field; currently not set by the standalone CLI. |
+| `source` | string | Optional source field; when present, indicates `events` or `tools`. The standalone CLI currently does not set it. |
 
 ### Text output format
 
@@ -205,13 +209,13 @@ with the original text format, `state`, `skb`, `seq`, `end`, `ack`, `flags`,
 `icsk_retransmits`, respectively.
 
 ```
-<timestamp> [<phase>/<reason>] <saddr>:<sport> > <daddr>:<dport> state=<STATE> family=<N> event_type=<TYPE> [SYNACK] [skb=<ADDR>] seq=<N> [end=<N>] ack=<N> [flags=<FLAGS>] pid=<N> comm=<COMM> ca=<N> retrans=<N> icsk_pending=<N> [reord_seen=<N>] [dsack_dups=<N>] [container_id=<ID>] [memcg_css=<N>] [net_namespace_cookie=<N>] [net_namespace_inode=<N>] [drop_location=<LOCATION>] [source=<SOURCE>]
+<timestamp> [<phase>/<tcp_reason>] <saddr>:<sport> > <daddr>:<dport> state=<STATE> event_type=<TYPE> [SYNACK] [skb=<ADDR>] seq=<N> [end=<N>] ack=<N> [flags=<FLAGS>] pid=<N> comm=<COMM> ca=<N> retrans=<N> icsk_pending=<N> [reord_seen=<N>] [dsack_dups=<N>] [container_id=<ID>] [memcg_css=<N>] [net_namespace_cookie=<N>] [net_namespace_inode=<N>] [drop_location=<LOCATION>] [source=<SOURCE>]
 ```
 
 Example:
 
 ```
-2026-07-23T02:14:40.304775546Z [data/RTO] 127.0.0.1:19996 > 127.0.0.1:42128 state=ESTABLISHED family=2 event_type=tcp_retransmit_skb skb=0xffff931c14fdf800 seq=3154974646 end=3154991030 ack=948393597 flags=ACK|PSH pid=1420 comm=kube-apiserver ca=4 retrans=4 icsk_pending=0 net_namespace_inode=4026531992
+2026-07-23T02:14:40.304775546Z [data/RTO] 127.0.0.1:19996 > 127.0.0.1:42128 state=ESTABLISHED event_type=tcp_retransmit_skb skb=0xffff931c14fdf800 seq=3154974646 end=3154991030 ack=948393597 flags=ACK|PSH pid=1420 comm=kube-apiserver ca=4 retrans=4 icsk_pending=0 net_namespace_inode=4026531992
 ```
 
 The `pid` and `comm` in this example describe the execution context in which
@@ -286,15 +290,15 @@ The complete phase mapping is:
 | `tcp_retransmit_skb`, `ca_state=0..2`, data phase | `unknown` | The available snapshots are insufficient to assign another label. |
 
 The classifier observes socket state at the hook and cannot reconstruct the
-complete ACK/loss history. Treat `reason` as a grouping label rather than a
+complete ACK/loss history. Treat `tcp_reason` as a grouping label rather than a
 verified root cause.
 
 ### 4.4 Reorder Heuristic
 
-`IsReorderProne(reord_seen, dsack_dups)` returns true when either cumulative
-counter is non-zero. Once a flow has reorder history, subsequent Recovery-state
-SKB events can be labeled `reorder_prone_fast`. This is a flow-level heuristic,
-not proof that the current retransmission was caused by reordering.
+The reorder-prone label is selected when either `reord_seen` or `dsack_dups` is
+non-zero. Once a flow has reorder history, subsequent Recovery-state SKB events
+can be labeled `reorder_prone_fast`. This is a flow-level heuristic, not proof
+that the current retransmission was caused by reordering.
 
 ---
 
@@ -310,8 +314,9 @@ NDJSON from stdout in this mode. Typical arguments are:
 ```bash
 tcpshark \
   --mode retransmit \
-  --bpf-path <CoreBpfDir>/tcpshark.o \
+  --bpf-path <CoreBpfDir>/tcp_retransmit.o \
   --output-storage /var/run/huatuo-toolstream.sock \
+  --max-events-per-second 100 \
   --filter "dst port 443"
 ```
 
@@ -329,7 +334,7 @@ is described in §6 and drop correlation in §7.
 ### Configuration reference (`huatuo-bamai.conf`)
 
 ```toml
-[EventTracing.TcpRetrans]
+[EventTracing.TCPRetransmit]
     # Forwarded to tcpshark --filter.
     # Applies only to tcp_retransmit_skb events; see §1.2.
     # Default: ""
@@ -337,19 +342,22 @@ is described in §6 and drop correlation in §7.
 
     # Forwarded as tcpshark --enable-tlp. Default: false.
     EnableTLP = false
+
+    # Forwarded as tcpshark --max-events-per-second. Default: 100; 0 disables it.
+    MaxEventsPerSecond = 100
 ```
 
-The `tcp_retrans` tracer is in the global `BlackList` by default. Remove it
+The `tcp_retransmit` tracer is in the global `BlackList` by default. Remove it
 from the list and restart huatuo-bamai to enable the tracer. Its
 drop-correlation cache is enabled only while the tracer is running and is
 cleared when the tracer stops.
 
-After `tcp_retrans` is no longer blacklisted, start or stop it through the HTTP
+After `tcp_retransmit` is no longer blacklisted, start or stop it through the HTTP
 API:
 
 ```bash
-curl -X PUT http://localhost:19704/tracers/tcp_retrans/start
-curl -X PUT http://localhost:19704/tracers/tcp_retrans/stop
+curl -X PUT http://localhost:19704/tracers/tcp_retransmit/start
+curl -X PUT http://localhost:19704/tracers/tcp_retransmit/stop
 ```
 
 ---
@@ -412,14 +420,14 @@ treat `network_or_host_hardware` as an investigation hint rather than a fact.
 ## 8. Operational Guidance and Noise Suppression
 
 No event type is unconditionally safe to discard. Prefer rate, ratio, and
-service-impact thresholds over filtering solely by `event_type` or `reason`.
+service-impact thresholds over filtering solely by `event_type` or `tcp_reason`.
 
 | Pattern | Typical priority | Guidance |
 |---------|------------------|----------|
-| `reason=RTO` | High | Investigate sustained or service-correlated increases; RTO normally has greater latency impact than Recovery-path retransmission. |
-| `reason=fast_retransmit` | Medium | Correlate with loss, congestion, and SACK/RACK behavior. |
-| `reason=reorder_prone_fast` | Context dependent | The flow has prior reorder history, but the current event is not proven spurious; inspect latency and counter growth. |
-| `reason=TLP` | Context dependent | Optional signal only; confirm that TLP collection was deliberately enabled before using it in alerting. |
+| `tcp_reason=RTO` | High | Investigate sustained or service-correlated increases; RTO normally has greater latency impact than Recovery-path retransmission. |
+| `tcp_reason=fast_retransmit` | Medium | Correlate with loss, congestion, and SACK/RACK behavior. |
+| `tcp_reason=reorder_prone_fast` | Context dependent | The flow has prior reorder history, but the current event is not proven spurious; inspect latency and counter growth. |
+| `tcp_reason=TLP` | Context dependent | Optional signal only; confirm that TLP collection was deliberately enabled before using it in alerting. |
 | `event_type=tcp_retransmit_synack` | Usually low per isolated retry | Repeated events can indicate handshake reachability, host egress, firewall, or client/network problems. |
 
 When building alerts, aggregate by service/connection and compare against
