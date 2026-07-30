@@ -6,7 +6,7 @@ source "$(dirname "$0")/env.sh"
 source "${ROOT_DIR}/integration/lib.sh"
 
 TCPSHARK_BIN="${ROOT_DIR}/_output/bin/tcpshark"
-BPF_OBJ="${ROOT_DIR}/_output/bpf/tcpshark.o"
+BPF_OBJ="${ROOT_DIR}/_output/bpf/tcp_retransmit.o"
 OUTPUT_DIR=$(mktemp -d /tmp/tcp_retrans_fast.XXXXXX)
 TEST_PORT=19998
 PAYLOAD_SIZE=2097152 # 2 MB
@@ -31,11 +31,11 @@ fi
 require_nc
 
 cleanup() {
-	[[ -n "${TCPSHARK_PID:-}" ]] && kill "${TCPSHARK_PID}" 2> /dev/null || true
-	[[ -n "${SRV_PID:-}" ]] && kill "${SRV_PID}" 2> /dev/null || true
-	[[ -n "${CLI_PID:-}" ]] && kill "${CLI_PID}" 2> /dev/null || true
-	ip netns del "${NS_S}" 2> /dev/null || true
-	ip netns del "${NS_C}" 2> /dev/null || true
+	[[ -n "${TCPSHARK_PID:-}" ]] && kill "${TCPSHARK_PID}" 2>/dev/null || true
+	[[ -n "${SRV_PID:-}" ]] && kill "${SRV_PID}" 2>/dev/null || true
+	[[ -n "${CLI_PID:-}" ]] && kill "${CLI_PID}" 2>/dev/null || true
+	ip netns del "${NS_S}" 2>/dev/null || true
+	ip netns del "${NS_C}" 2>/dev/null || true
 	rm -rf "${OUTPUT_DIR}"
 }
 trap cleanup EXIT
@@ -74,36 +74,36 @@ ip netns exec "${NS_C}" iptables -I INPUT 1 -p tcp --sport "${TEST_PORT}" \
 log_info "connbytes rule: drop reply packet #30 in client netns"
 
 # 3. Start tcpshark in retransmit mode in the root netns (sees all netns traffic via BPF).
-"${TCPSHARK_BIN}" --mode retransmit --bpf-path "${BPF_OBJ}" --duration 15 --output json > "${OUTPUT_DIR}/events.json" 2> "${OUTPUT_DIR}/stderr.log" &
+"${TCPSHARK_BIN}" --mode retransmit --bpf-path "${BPF_OBJ}" --duration 15 --output json >"${OUTPUT_DIR}/events.json" 2>"${OUTPUT_DIR}/stderr.log" &
 TCPSHARK_PID=$!
 sleep 1
 
 # 4. Server: nc listens and sends 2 MB of data.
-ip netns exec "${NS_S}" bash -c "head -c ${PAYLOAD_SIZE} /dev/zero | timeout 10 $(nc_listen_cmd "${S_ADDR}" "${TEST_PORT}")" > /dev/null 2>&1 &
+ip netns exec "${NS_S}" bash -c "head -c ${PAYLOAD_SIZE} /dev/zero | timeout 10 $(nc_listen_cmd "${S_ADDR}" "${TEST_PORT}")" >/dev/null 2>&1 &
 SRV_PID=$!
 sleep 0.5
 
 # 5. Client: connect and receive data to /dev/null.
-ip netns exec "${NS_C}" timeout 8 bash -c "exec 3<>/dev/tcp/${S_ADDR}/${TEST_PORT}; cat <&3 >/dev/null" 2> /dev/null &
+ip netns exec "${NS_C}" timeout 8 bash -c "exec 3<>/dev/tcp/${S_ADDR}/${TEST_PORT}; cat <&3 >/dev/null" 2>/dev/null &
 CLI_PID=$!
 
 # 6. Wait for data transfer + fast retransmit (3 dup ACKs are fast on veth).
 sleep 10
 
-kill "${TCPSHARK_PID}" 2> /dev/null || true
+kill "${TCPSHARK_PID}" 2>/dev/null || true
 sleep 0.3
 TCPSHARK_PID=""
 
 # Filter events for our test port (server-side sport).
-grep "\"sport\":${TEST_PORT}" "${OUTPUT_DIR}/events.json" > "${OUTPUT_DIR}/filtered.json" 2> /dev/null || true
+grep "\"sport\":${TEST_PORT}" "${OUTPUT_DIR}/events.json" >"${OUTPUT_DIR}/filtered.json" 2>/dev/null || true
 
-FAST_COUNT=$(grep -c '"reason":"fast_retransmit"' "${OUTPUT_DIR}/filtered.json" 2> /dev/null || true)
+FAST_COUNT=$(grep -c '"tcp_reason":"fast_retransmit"' "${OUTPUT_DIR}/filtered.json" 2>/dev/null || true)
 FAST_COUNT=${FAST_COUNT:-0}
-REORDER_FAST=$(grep -c '"reason":"reorder_prone_fast"' "${OUTPUT_DIR}/filtered.json" 2> /dev/null || true)
+REORDER_FAST=$(grep -c '"tcp_reason":"reorder_prone_fast"' "${OUTPUT_DIR}/filtered.json" 2>/dev/null || true)
 REORDER_FAST=${REORDER_FAST:-0}
-RECOVERY=$(grep -c '"ca_state":3' "${OUTPUT_DIR}/filtered.json" 2> /dev/null || true)
+RECOVERY=$(grep -c '"ca_state":3' "${OUTPUT_DIR}/filtered.json" 2>/dev/null || true)
 RECOVERY=${RECOVERY:-0}
-RTO_COUNT=$(grep -c '"reason":"RTO"' "${OUTPUT_DIR}/filtered.json" 2> /dev/null || true)
+RTO_COUNT=$(grep -c '"tcp_reason":"RTO"' "${OUTPUT_DIR}/filtered.json" 2>/dev/null || true)
 RTO_COUNT=${RTO_COUNT:-0}
 
 log_info "fast_retransmit: ${FAST_COUNT}, reorder_prone_fast: ${REORDER_FAST}, ca_state=3: ${RECOVERY}, RTO: ${RTO_COUNT}"
