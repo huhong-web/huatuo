@@ -29,11 +29,11 @@ TEST_PORT=19994
 require_nc
 
 cleanup() {
-	[[ -n "${TCPSHARK_PID:-}" ]] && kill "${TCPSHARK_PID}" 2>/dev/null || true
-	[[ -n "${NC_PID:-}" ]] && kill "${NC_PID}" 2>/dev/null || true
+	[[ -n "${TCPSHARK_PID:-}" ]] && kill "${TCPSHARK_PID}" 2> /dev/null || true
+	[[ -n "${NC_PID:-}" ]] && kill "${NC_PID}" 2> /dev/null || true
 	sleep 0.2
-	[[ -n "${TCPSHARK_PID:-}" ]] && kill -9 "${TCPSHARK_PID}" 2>/dev/null || true
-	iptables -D OUTPUT -p tcp --dport "${TEST_PORT}" --tcp-flags SYN,ACK ACK -j DROP 2>/dev/null || true
+	[[ -n "${TCPSHARK_PID:-}" ]] && kill -9 "${TCPSHARK_PID}" 2> /dev/null || true
+	iptables -D OUTPUT -p tcp --dport "${TEST_PORT}" --tcp-flags SYN,ACK ACK -j DROP 2> /dev/null || true
 	rm -rf "${OUTPUT_DIR}"
 }
 trap cleanup EXIT
@@ -41,7 +41,7 @@ trap cleanup EXIT
 log_info "SYNACK retrans: drop client's final ACK so server retransmits SYNACK via inet_rtx_synack"
 
 # 1. nc holds a listening socket; the kernel completes the 3-way handshake.
-timeout 8 $(nc_listen_cmd "127.0.0.1" "${TEST_PORT}") >/dev/null 2>&1 &
+timeout 8 $(nc_listen_cmd "127.0.0.1" "${TEST_PORT}") > /dev/null 2>&1 &
 NC_PID=$!
 sleep 0.5
 
@@ -53,21 +53,21 @@ iptables -I OUTPUT 1 -p tcp --dport "${TEST_PORT}" --tcp-flags SYN,ACK ACK -j DR
 log_info "iptables: DROP pure ACK (dport=${TEST_PORT})"
 
 # 3. Start tcpshark in retransmit mode.
-"${TCPSHARK_BIN}" --mode retransmit --bpf-path "${BPF_OBJ}" --duration 8 --output json >"${OUTPUT_DIR}/events.json" 2>"${OUTPUT_DIR}/stderr.log" &
+"${TCPSHARK_BIN}" --mode retransmit --bpf-path "${BPF_OBJ}" --duration 8 --output json > "${OUTPUT_DIR}/events.json" 2> "${OUTPUT_DIR}/stderr.log" &
 TCPSHARK_PID=$!
 sleep 1
 
 # 4. Client connects: SYN → server, SYNACK → client, ACK → dropped.
-timeout 3 bash -c "exec 3<>/dev/tcp/127.0.0.1/${TEST_PORT}" 2>/dev/null || true
+timeout 3 bash -c "exec 3<>/dev/tcp/127.0.0.1/${TEST_PORT}" 2> /dev/null || true
 
 # 5. Wait for SYNACK retransmissions (initial RTO ~1s, exponential backoff).
 sleep 5
 
-kill "${TCPSHARK_PID}" 2>/dev/null || true
+kill "${TCPSHARK_PID}" 2> /dev/null || true
 sleep 0.3
 TCPSHARK_PID=""
 
-SYNACK_COUNT=$(grep -c '"event_type":"tcp_retransmit_synack"' "${OUTPUT_DIR}/events.json" 2>/dev/null || true)
+SYNACK_COUNT=$(grep -c '"event_type":"tcp_retransmit_synack"' "${OUTPUT_DIR}/events.json" 2> /dev/null || true)
 SYNACK_COUNT=${SYNACK_COUNT:-0}
 
 log_info "SYNACK events: ${SYNACK_COUNT}"
@@ -76,7 +76,7 @@ if ((SYNACK_COUNT >= 1)); then
 	log_info "PASS: SYNACK retrans events detected"
 else
 	log_error "FAIL: expected >=1 synack events"
-	cat "${OUTPUT_DIR}/events.json" 2>/dev/null || true
-	cat "${OUTPUT_DIR}/stderr.log" 2>/dev/null || true
+	cat "${OUTPUT_DIR}/events.json" 2> /dev/null || true
+	cat "${OUTPUT_DIR}/stderr.log" 2> /dev/null || true
 	fatal "synack test failed"
 fi
