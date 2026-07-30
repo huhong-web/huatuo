@@ -22,7 +22,7 @@ import (
 	"huatuo-bamai/internal/log"
 )
 
-//go:generate $BPF_COMPILE $BPF_INCLUDE -s $BPF_DIR/tcpshark.c -o $BPF_DIR/tcpshark.o
+//go:generate $BPF_COMPILE $BPF_INCLUDE -s $BPF_DIR/tcp_retransmit.c -o $BPF_DIR/tcp_retransmit.o
 
 const tcpSharkToolName = "tcpshark"
 

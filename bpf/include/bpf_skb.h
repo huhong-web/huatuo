@@ -9,7 +9,7 @@
 
 /* Read the TCP header at skb->transport_header into caller-owned storage. */
 static __always_inline bool
-skb_read_tcp_header(struct sk_buff *skb, struct tcphdr *tcp_hdr)
+skb_tcp_header(struct sk_buff *skb, struct tcphdr *tcp_hdr)
 {
 	if (!skb || !tcp_hdr)
 		return false;

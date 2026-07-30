@@ -1,4 +1,4 @@
-// Copyright 2025 The HuaTuo Authors
+// Copyright 2025, 2026 The HuaTuo Authors
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -22,6 +22,12 @@
 package types
 
 import "errors"
+
+// Values for tracing event Source fields.
+const (
+	SourceTypesEvent = "events"
+	SourceTypesTool  = "tools"
+)
 
 var (
 	// ErrExitByCancelCtx defined an error canceled by context

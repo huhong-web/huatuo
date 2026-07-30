@@ -47,9 +47,3 @@ type DropWatchTracing struct {
 	Layers              *packet.Packet `json:"layers,omitempty"`
 	Stack               string         `json:"stack"`
 }
-
-// Values for DropWatchTracing.Source.
-const (
-	DropSourceTypesEvent = "events"
-	DropSourceTypesTool  = "tools"
-)

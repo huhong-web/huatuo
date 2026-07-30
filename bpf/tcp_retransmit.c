@@ -1,5 +1,7 @@
 // go:build ignore
 
+// Copyright 2026 Didi. Licensed under the Apache License, Version 2.0.
+
 #include "vmlinux.h"
 
 #include <bpf/bpf_core_read.h>
@@ -11,6 +13,7 @@
 #include "bpf_cgroup.h"
 #include "bpf_net_namespace.h"
 #include "bpf_pcap_stub.h"
+#include "bpf_ratelimit.h"
 #include "bpf_tcp_reorder.h"
 #include "vmlinux_net.h"
 
@@ -35,28 +38,23 @@ struct retrans_event {
 	u64 net_cookie;
 	u32 net_inum;
 	u32 state;
-	u16 sport;
-	u16 dport;
-	u16 family;
-	u8  saddr[4];
-	u8  daddr[4];
-	u8  saddr_v6[16];
-	u8  daddr_v6[16];
-	u8  ca_state;
-	u8  icsk_retransmits;
-	u8  event_type;
-	u8  _pad;
-	u8 _go_pad[2];
-	u8  icsk_pending;
-	u8  _pad3[3];
 	u32 reord_seen;
 	u32 dsack_dups;
 	u32 tcp_seq;
 	u32 tcp_ack;
-	u8  comm[COMPAT_TASK_COMM_LEN];
 	u32 tcp_end_seq;
+	u16 sport;
+	u16 dport;
+	u16 family;
+	u8  ca_state;
+	u8  icsk_retransmits;
+	u8  event_type;
+	u8  icsk_pending;
 	u8  tcp_flags;
-	u8  _tail_pad[3];
+	u8  saddr[16];
+	u8  daddr[16];
+	u8  comm[COMPAT_TASK_COMM_LEN];
+	u8  _pad[1];
 };
 
 struct {
@@ -64,6 +62,8 @@ struct {
 	__uint(key_size, sizeof(int));
 	__uint(value_size, sizeof(u32));
 } perf_events SEC(".maps");
+
+BPF_RATELIMIT_IN_MAP_RC(tcp_retransmit);
 
 char __license[] SEC("license") = "Dual MIT/GPL";
 
@@ -111,8 +111,8 @@ static __always_inline void fill_addrs_v6_from_sk(struct retrans_event *ev,
 	struct in6_addr dst = {};
 	BPF_CORE_READ_INTO(&src, sk, __sk_common.skc_v6_rcv_saddr);
 	BPF_CORE_READ_INTO(&dst, sk, __sk_common.skc_v6_daddr);
-	__builtin_memcpy(ev->saddr_v6, &src, sizeof(src));
-	__builtin_memcpy(ev->daddr_v6, &dst, sizeof(dst));
+	__builtin_memcpy(ev->saddr, &src, sizeof(src));
+	__builtin_memcpy(ev->daddr, &dst, sizeof(dst));
 }
 
 static __always_inline void fill_addrs_v4_from_req(struct retrans_event *ev,
@@ -139,8 +139,8 @@ static __always_inline void fill_addrs_v6_from_req(struct retrans_event *ev,
 	struct in6_addr dst = {};
 	BPF_CORE_READ_INTO(&src, req, __req_common.skc_v6_rcv_saddr);
 	BPF_CORE_READ_INTO(&dst, req, __req_common.skc_v6_daddr);
-	__builtin_memcpy(ev->saddr_v6, &src, sizeof(src));
-	__builtin_memcpy(ev->daddr_v6, &dst, sizeof(dst));
+	__builtin_memcpy(ev->saddr, &src, sizeof(src));
+	__builtin_memcpy(ev->daddr, &dst, sizeof(dst));
 }
 
 static __always_inline void fill_addrs_from_req(struct retrans_event *ev,
@@ -252,6 +252,9 @@ int retrans_skb(struct tcp_retransmit_skb_ctx *ctx)
 	if (skb && !PCAP_STUB_PASS_SKB(skb))
 		return 0;
 
+	if (bpf_ratelimited_in_map_rc(ctx, tcp_retransmit))
+		return 0;
+
 	struct retrans_event ev = {};
 
 	ev.event_type = RETRANS_EVENT_SKB;
@@ -273,15 +276,21 @@ int retrans_skb(struct tcp_retransmit_skb_ctx *ctx)
 SEC("tracepoint/tcp/tcp_retransmit_synack")
 int retrans_synack(struct trace_event_raw_tcp_retransmit_synack *ctx)
 {
+	struct sock *sk = (struct sock *)ctx->skaddr;
+	struct request_sock *req = (struct request_sock *)ctx->req;
+
+	if (!sk && !req)
+		return 0;
+
+	if (bpf_ratelimited_in_map_rc(ctx, tcp_retransmit))
+		return 0;
+
 	struct retrans_event ev = {};
 
 	ev.event_type = RETRANS_EVENT_SYNACK;
 	ev.ktime_ns = bpf_ktime_get_ns();
 	ev.tgid_pid = bpf_get_current_pid_tgid();
 	bpf_get_current_comm(&ev.comm, sizeof(ev.comm));
-
-	struct sock *sk = (struct sock *)ctx->skaddr;
-	struct request_sock *req = (struct request_sock *)ctx->req;
 
 	if (sk) {
 		ev.family = BPF_CORE_READ(sk, __sk_common.skc_family);
@@ -316,6 +325,9 @@ int retrans_tlp(struct pt_regs *ctx)
 	struct sock *sk = (struct sock *)PT_REGS_PARM1_CORE(ctx);
 
 	if (!sk)
+		return 0;
+
+	if (bpf_ratelimited_in_map_rc(ctx, tcp_retransmit))
 		return 0;
 
 	ev.event_type = RETRANS_EVENT_TLP;

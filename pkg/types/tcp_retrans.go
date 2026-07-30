@@ -14,17 +14,62 @@
 
 package types
 
-import "huatuo-bamai/internal/packet"
-
 // RetransPhase is the connection state-machine stage for a TCP retransmission.
-type RetransPhase = packet.RetransPhase
+type RetransPhase uint8
+
+const (
+	RetransPhaseConnect RetransPhase = iota
+	RetransPhaseData
+	RetransPhaseClose
+)
+
+func (p RetransPhase) String() string {
+	switch p {
+	case RetransPhaseConnect:
+		return "connect"
+	case RetransPhaseData:
+		return "data"
+	case RetransPhaseClose:
+		return "close"
+	default:
+		return "unknown"
+	}
+}
 
 // RetransReason is the trigger subcategory within a phase.
-type RetransReason = packet.RetransReason
+type RetransReason uint8
+
+const (
+	RetransReasonRTO RetransReason = iota
+	RetransReasonFast
+	RetransReasonReorderProneFast
+	RetransReasonTLP
+	RetransReasonSpurious
+	RetransReasonUnknown
+)
+
+func (r RetransReason) String() string {
+	switch r {
+	case RetransReasonRTO:
+		return "RTO"
+	case RetransReasonFast:
+		return "fast_retransmit"
+	case RetransReasonReorderProneFast:
+		return "reorder_prone_fast"
+	case RetransReasonTLP:
+		return "TLP"
+	case RetransReasonSpurious:
+		return "spurious"
+	default:
+		return "unknown"
+	}
+}
 
 // TCPRetransTracing is the canonical JSON schema for a TCP retransmission event.
 type TCPRetransTracing struct {
 	ObservedTimestamp  string `json:"observed_timestamp"`
+	TCPReason          string `json:"tcp_reason"` // "RTO", "fast_retransmit", "reorder_prone_fast", "TLP", "spurious", "unknown"
+	Source             string `json:"source,omitempty"`
 	Comm               string `json:"comm"`
 	Pid                uint64 `json:"pid"`
 	ContainerID        string `json:"container_id,omitempty"`
@@ -32,24 +77,22 @@ type TCPRetransTracing struct {
 	NetNamespaceCookie uint64 `json:"net_namespace_cookie,omitempty"`
 	NetNamespaceInode  uint32 `json:"net_namespace_inode,omitempty"`
 
-	// Connection identity
-	Saddr  string `json:"saddr"`
-	Daddr  string `json:"daddr"`
-	Sport  uint16 `json:"sport"`
-	Dport  uint16 `json:"dport"`
-	Family uint16 `json:"family"` // AF_INET=2, AF_INET6=10
+	// Connection identity.
+	Saddr string `json:"saddr"`
+	Daddr string `json:"daddr"`
+	Sport uint16 `json:"sport"`
+	Dport uint16 `json:"dport"`
 
-	// TCP state machine
+	// TCP state machine.
 	State string `json:"tcp_state"` // e.g. "ESTABLISHED", "SYN_SENT", "SYN_RECV"
 
-	// Phase / Reason classification
-	Phase  string `json:"phase"`  // "connect", "data", "close"
-	Reason string `json:"reason"` // "RTO", "fast_retransmit", "reorder_prone_fast", "TLP", "spurious", "unknown"
+	// Phase classification.
+	Phase string `json:"phase"` // "connect", "data", "close"
 
-	// Event discriminator
+	// Event discriminator.
 	EventType string `json:"event_type"` // "tcp_retransmit_skb", "tcp_retransmit_synack", or "tcp_send_loss_probe"
 
-	// Congestion control state (raw BPF fields)
+	// Congestion control state (raw BPF fields).
 	CaState         uint8 `json:"ca_state"`         // icsk_ca_state: 0=Open, 3=Recovery, 4=Loss
 	IcskRetransmits uint8 `json:"icsk_retransmits"` // current retrans counter for the connection
 	IcskPending     uint8 `json:"icsk_pending"`     // raw inet_connection_sock timer state
@@ -70,11 +113,9 @@ type TCPRetransTracing struct {
 	TCPEndSeq uint32 `json:"tcp_end_seq,omitempty"`
 	TCPFlags  string `json:"tcp_flags,omitempty"`
 
-	// Kernel internals
+	// Kernel internals.
 	SkbAddr string `json:"skb_addr,omitempty"` // the sk_buff pointer being retransmitted
 
-	// Correlation with dropwatch / netdev_hw
+	// Correlation with dropwatch / netdev_hw.
 	DropLocation string `json:"drop_location,omitempty"` // "host_software", "network_or_host_hardware", or "unknown"
-
-	Source string `json:"source,omitempty"`
 }

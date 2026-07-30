@@ -23,14 +23,15 @@ import (
 )
 
 const (
-	cliFlagMode          = "mode"
-	cliFlagEnableTLP     = "enable-tlp"
-	cliFlagBpfPath       = "bpf-path"
-	cliFlagFilter        = "filter"
-	cliFlagDuration      = "duration"
-	cliFlagOutput        = "output"
-	cliFlagOutputStorage = "output-storage"
-	cliFlagTaskID        = "task-id"
+	cliFlagMode               = "mode"
+	cliFlagEnableTLP          = "enable-tlp"
+	cliFlagBpfPath            = "bpf-path"
+	cliFlagFilter             = "filter"
+	cliFlagDuration           = "duration"
+	cliFlagOutput             = "output"
+	cliFlagOutputStorage      = "output-storage"
+	cliFlagTaskID             = "task-id"
+	cliFlagMaxEventsPerSecond = "max-events-per-second"
 )
 
 const (
@@ -64,6 +65,11 @@ func appFlags() []cli.Flag {
 		&cli.IntFlag{
 			Name:  cliFlagDuration,
 			Usage: "run for N seconds then exit (0=forever)",
+		},
+		&cli.Uint64Flag{
+			Name:  cliFlagMaxEventsPerSecond,
+			Usage: "rate limit to N events/sec (0 = unlimited)",
+			Value: 0,
 		},
 		&cli.StringFlag{
 			Name:  cliFlagOutput,

@@ -23,12 +23,23 @@ import (
 	"huatuo-bamai/internal/pcapfilter"
 )
 
-func loadTCPRetransBPFWithFilter(bpfPath, filterExpr string) (bpf.BPF, error) {
+var eventRateLimiter = bpf.NewRateLimiter("tcp_retransmit", "tcpshark")
+
+func loadTCPRetransBPFWithFilter(
+	bpfPath string,
+	filterExpr string,
+	maxEventsPerSecond uint64,
+) (bpf.BPF, error) {
 	bpfBytes, err := os.ReadFile(bpfPath)
 	if err != nil {
 		return nil, fmt.Errorf("read bpf object: %w", err)
 	}
 
-	bpfName := fmt.Sprintf("tcp_retrans_%d.o", time.Now().UnixNano())
-	return pcapfilter.Load(bpfName, bpfBytes, filterExpr, nil)
+	bpfName := fmt.Sprintf("tcp_retransmit_%d.o", time.Now().UnixNano())
+	return pcapfilter.Load(
+		bpfName,
+		bpfBytes,
+		filterExpr,
+		eventRateLimiter.ApplyConstants(nil, maxEventsPerSecond),
+	)
 }

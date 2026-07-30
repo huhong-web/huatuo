@@ -30,6 +30,8 @@ func TestTCPRetransTracingRoundTrip(t *testing.T) {
 			name: "full_event",
 			ev: &TCPRetransTracing{
 				ObservedTimestamp:  "2026-07-08T09:19:52.042035335Z",
+				TCPReason:          "reorder_prone_fast",
+				Source:             SourceTypesEvent,
 				Comm:               "kube-apiserver",
 				Pid:                1234,
 				ContainerID:        "abc123",
@@ -40,10 +42,8 @@ func TestTCPRetransTracingRoundTrip(t *testing.T) {
 				Daddr:              "10.0.0.2",
 				Sport:              6443,
 				Dport:              58244,
-				Family:             2,
 				State:              "ESTABLISHED",
 				Phase:              "data",
-				Reason:             "reorder_prone_fast",
 				EventType:          "tcp_retransmit_skb",
 				CaState:            3,
 				IcskRetransmits:    0,
@@ -56,21 +56,19 @@ func TestTCPRetransTracingRoundTrip(t *testing.T) {
 				TCPFlags:           "ACK|FIN",
 				SkbAddr:            "0xffff888012345678",
 				DropLocation:       "network_or_host_hardware",
-				Source:             "events",
 			},
 		},
 		{
 			name: "minimal_event",
 			ev: &TCPRetransTracing{
 				ObservedTimestamp: "2026-07-08T00:00:00Z",
+				TCPReason:         "RTO",
 				Saddr:             "::",
 				Daddr:             "::",
 				Sport:             80,
 				Dport:             443,
-				Family:            10,
 				State:             "ESTABLISHED",
 				Phase:             "data",
-				Reason:            "RTO",
 				EventType:         "tcp_retransmit_skb",
 			},
 		},
@@ -78,14 +76,13 @@ func TestTCPRetransTracingRoundTrip(t *testing.T) {
 			name: "synack_zero_seq",
 			ev: &TCPRetransTracing{
 				ObservedTimestamp: "2026-07-08T00:00:00Z",
+				TCPReason:         "RTO",
 				Saddr:             "10.0.0.1",
 				Daddr:             "10.0.0.2",
 				Sport:             6443,
 				Dport:             50000,
-				Family:            2,
 				State:             "NEW_SYN_RECV",
 				Phase:             "connect",
-				Reason:            "RTO",
 				EventType:         "tcp_retransmit_synack",
 			},
 		},
@@ -93,14 +90,13 @@ func TestTCPRetransTracingRoundTrip(t *testing.T) {
 			name: "tlp event",
 			ev: &TCPRetransTracing{
 				ObservedTimestamp: "2026-07-08T00:00:00Z",
+				TCPReason:         "TLP",
 				Saddr:             "10.0.0.1",
 				Daddr:             "10.0.0.2",
 				Sport:             6443,
 				Dport:             50000,
-				Family:            2,
 				State:             "ESTABLISHED",
 				Phase:             "data",
-				Reason:            "TLP",
 				EventType:         "tcp_send_loss_probe",
 				TCPSeq:            123,
 				TCPAck:            100,
@@ -130,14 +126,13 @@ func TestTCPRetransTracingRoundTrip(t *testing.T) {
 func TestTCPRetransTracingOmitEmpty(t *testing.T) {
 	ev := &TCPRetransTracing{
 		ObservedTimestamp: "2026-07-08T00:00:00Z",
+		TCPReason:         "RTO",
 		Saddr:             "10.0.0.1",
 		Daddr:             "10.0.0.2",
 		Sport:             80,
 		Dport:             443,
-		Family:            2,
 		State:             "ESTABLISHED",
 		Phase:             "data",
-		Reason:            "RTO",
 		EventType:         "tcp_retransmit_skb",
 	}
 
@@ -149,6 +144,16 @@ func TestTCPRetransTracingOmitEmpty(t *testing.T) {
 	var raw map[string]any
 	if err := json.Unmarshal(b, &raw); err != nil {
 		t.Fatalf("Unmarshal to map: %v", err)
+	}
+
+	if got := raw["tcp_reason"]; got != "RTO" {
+		t.Errorf("tcp_reason = %v, want RTO", got)
+	}
+	if _, ok := raw["reason"]; ok {
+		t.Error("reason field should be absent")
+	}
+	if _, ok := raw["family"]; ok {
+		t.Error("family field should be absent")
 	}
 
 	omitFields := []string{

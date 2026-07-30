@@ -42,15 +42,14 @@ type textWriter struct{ w io.Writer }
 
 func (s *textWriter) Write(ev *types.TCPRetransTracing) error {
 	detail := fmt.Sprintf(
-		"[%s/%s] %s:%d > %s:%d state=%s family=%d event_type=%s",
+		"[%s/%s] %s:%d > %s:%d state=%s event_type=%s",
 		ev.Phase,
-		ev.Reason,
+		ev.TCPReason,
 		ev.Saddr,
 		ev.Sport,
 		ev.Daddr,
 		ev.Dport,
 		ev.State,
-		ev.Family,
 		ev.EventType,
 	)
 	if ev.EventType == "tcp_retransmit_synack" {
@@ -162,11 +161,11 @@ func formatEvent(ev *retransEvent) *types.TCPRetransTracing {
 	var saddr, daddr string
 	switch ev.Family {
 	case unix.AF_INET:
+		saddr = net.IP(ev.Saddr[:net.IPv4len]).String()
+		daddr = net.IP(ev.Daddr[:net.IPv4len]).String()
+	case unix.AF_INET6:
 		saddr = net.IP(ev.Saddr[:]).String()
 		daddr = net.IP(ev.Daddr[:]).String()
-	case unix.AF_INET6:
-		saddr = net.IP(ev.SaddrV6[:]).String()
-		daddr = net.IP(ev.DaddrV6[:]).String()
 	}
 
 	eventTypeStr := "unknown"
@@ -181,6 +180,7 @@ func formatEvent(ev *retransEvent) *types.TCPRetransTracing {
 
 	return &types.TCPRetransTracing{
 		ObservedTimestamp:  time.Now().UTC().Format(time.RFC3339Nano),
+		TCPReason:          reason.String(),
 		Comm:               bytesutil.ToStr(ev.Comm[:]),
 		Pid:                ev.TgidPid >> 32,
 		MemcgCssAddr:       ev.MemcgCssAddr,
@@ -190,10 +190,8 @@ func formatEvent(ev *retransEvent) *types.TCPRetransTracing {
 		Daddr:              daddr,
 		Sport:              ev.Sport,
 		Dport:              ev.Dport,
-		Family:             ev.Family,
 		State:              tcpStateNameRaw(uint8(ev.State)),
 		Phase:              phase.String(),
-		Reason:             reason.String(),
 		EventType:          eventTypeStr,
 		CaState:            ev.CaState,
 		IcskRetransmits:    ev.IcskRetransmits,
@@ -205,23 +203,6 @@ func formatEvent(ev *retransEvent) *types.TCPRetransTracing {
 		TCPEndSeq:          ev.TCPEndSeq,
 		TCPFlags:           tcpFlags,
 		SkbAddr:            kernaddr.Format(ev.SkbAddr),
-	}
-}
-
-func classifyEvent(ev *retransEvent, tcpFlags string) (packet.RetransPhase, packet.RetransReason) {
-	switch ev.EventType {
-	case retransEventSynack:
-		return packet.RetransPhaseConnect, packet.RetransReasonRTO
-	case retransEventTLP:
-		return packet.RetransPhaseData, packet.RetransReasonTLP
-	default:
-		return packet.ClassifyRetrans(
-			uint8(ev.State),
-			tcpFlags,
-			ev.CaState,
-			ev.ReordSeen,
-			ev.DsackDups,
-		)
 	}
 }
 

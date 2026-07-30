@@ -78,13 +78,13 @@ func mainAction(c *cli.Context) error {
 	}()
 
 	if maxEventsPerSecond > 0 {
-		rlReader, err := openRateLimitEventPipe(runCtx, bpfObj)
+		rlReader, err := eventRateLimiter.OpenEventPipe(runCtx, bpfObj)
 		if err != nil {
 			return err
 		}
 		defer rlReader.Close()
 
-		go readRateLimitEvents(runCtx, rlReader, maxEventsPerSecond)
+		go eventRateLimiter.ReadEvents(runCtx, rlReader, maxEventsPerSecond)
 	}
 
 	reader, err := bpfObj.AttachAndEventPipe(runCtx, "perf_events", 8192)

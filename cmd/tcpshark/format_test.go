@@ -18,8 +18,11 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"net"
 	"strings"
 	"testing"
+
+	"golang.org/x/sys/unix"
 
 	"huatuo-bamai/pkg/types"
 )
@@ -143,11 +146,61 @@ func TestFormatEventTLP(t *testing.T) {
 	if event.Phase != "data" {
 		t.Errorf("Phase = %q, want data", event.Phase)
 	}
-	if event.Reason != "TLP" {
-		t.Errorf("Reason = %q, want TLP", event.Reason)
+	if event.TCPReason != "TLP" {
+		t.Errorf("TCPReason = %q, want TLP", event.TCPReason)
 	}
 	if event.TCPSeq != 123 || event.TCPAck != 100 {
 		t.Errorf("sequence fields = (%d, %d), want (123, 100)", event.TCPSeq, event.TCPAck)
+	}
+}
+
+func TestFormatEventAddresses(t *testing.T) {
+	t.Parallel()
+
+	ipv6Saddr := net.ParseIP("2001:db8::1").To16()
+	ipv6Daddr := net.ParseIP("2001:db8::2").To16()
+
+	tests := []struct {
+		name      string
+		ev        *retransEvent
+		wantSaddr string
+		wantDaddr string
+	}{
+		{
+			name: "ipv4 uses first four bytes",
+			ev: &retransEvent{
+				Family: unix.AF_INET,
+				Saddr:  [16]byte{127, 0, 0, 1, 0xff},
+				Daddr:  [16]byte{10, 0, 0, 1, 0xff},
+			},
+			wantSaddr: "127.0.0.1",
+			wantDaddr: "10.0.0.1",
+		},
+		{
+			name: "ipv6 uses full sixteen bytes",
+			ev: &retransEvent{
+				Family: unix.AF_INET6,
+			},
+			wantSaddr: "2001:db8::1",
+			wantDaddr: "2001:db8::2",
+		},
+	}
+
+	copy(tests[1].ev.Saddr[:], ipv6Saddr)
+	copy(tests[1].ev.Daddr[:], ipv6Daddr)
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			event := formatEvent(tt.ev)
+			if event.Saddr != tt.wantSaddr {
+				t.Fatalf("Saddr = %q, want %q", event.Saddr, tt.wantSaddr)
+			}
+			if event.Daddr != tt.wantDaddr {
+				t.Fatalf("Daddr = %q, want %q", event.Daddr, tt.wantDaddr)
+			}
+		})
 	}
 }
 
@@ -207,6 +260,8 @@ func TestTextWriterFormatsAllEventFields(t *testing.T) {
 			name: "full event",
 			ev: &types.TCPRetransTracing{
 				ObservedTimestamp:  "2026-07-23T02:14:40.304775546Z",
+				TCPReason:          "RTO",
+				Source:             types.SourceTypesTool,
 				Comm:               "worker thread",
 				Pid:                1420,
 				ContainerID:        "container-1",
@@ -217,10 +272,8 @@ func TestTextWriterFormatsAllEventFields(t *testing.T) {
 				Daddr:              "127.0.0.1",
 				Sport:              19996,
 				Dport:              42128,
-				Family:             2,
 				State:              "ESTABLISHED",
 				Phase:              "data",
-				Reason:             "RTO",
 				EventType:          "tcp_retransmit_skb",
 				CaState:            4,
 				IcskRetransmits:    4,
@@ -233,35 +286,33 @@ func TestTextWriterFormatsAllEventFields(t *testing.T) {
 				TCPFlags:           "ACK|PSH",
 				SkbAddr:            "0xffff931c14fdf800",
 				DropLocation:       "host_software",
-				Source:             "tcpshark",
 			},
 			want: "2026-07-23T02:14:40.304775546Z " +
 				"[data/RTO] 127.0.0.1:19996 > 127.0.0.1:42128 " +
-				"state=ESTABLISHED family=2 event_type=tcp_retransmit_skb " +
+				"state=ESTABLISHED event_type=tcp_retransmit_skb " +
 				"skb=0xffff931c14fdf800 seq=3154974646 end=3154991030 " +
 				"ack=948393597 flags=ACK|PSH pid=1420 comm=worker thread " +
 				"ca=4 retrans=4 icsk_pending=1 reord_seen=2 dsack_dups=3 " +
 				"container_id=container-1 memcg_css=1 net_namespace_cookie=2 " +
 				"net_namespace_inode=4026531992 drop_location=host_software " +
-				"source=tcpshark\n",
+				"source=tools\n",
 		},
 		{
 			name: "omitempty fields",
 			ev: &types.TCPRetransTracing{
 				ObservedTimestamp: "2026-07-23T02:14:40Z",
+				TCPReason:         "RTO",
 				Saddr:             "127.0.0.1",
 				Daddr:             "127.0.0.1",
 				Sport:             19996,
 				Dport:             42128,
-				Family:            2,
 				State:             "ESTABLISHED",
 				Phase:             "data",
-				Reason:            "RTO",
 				EventType:         "tcp_retransmit_skb",
 			},
 			want: "2026-07-23T02:14:40Z " +
 				"[data/RTO] 127.0.0.1:19996 > 127.0.0.1:42128 " +
-				"state=ESTABLISHED family=2 event_type=tcp_retransmit_skb " +
+				"state=ESTABLISHED event_type=tcp_retransmit_skb " +
 				"seq=0 ack=0 pid=0 comm= ca=0 retrans=0 icsk_pending=0\n",
 		},
 	}

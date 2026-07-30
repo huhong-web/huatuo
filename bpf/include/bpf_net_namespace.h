@@ -51,7 +51,7 @@ static __always_inline u32 skb_netns_inum(struct sk_buff *skb)
 
 	struct sock *sk = BPF_CORE_READ(skb, sk);
 	if (sk) {
-		return BPF_CORE_READ(sk, __sk_common.skc_net.net, ns.inum);
+		return sk_netns_inum(sk);
 	}
 
 	return 0;

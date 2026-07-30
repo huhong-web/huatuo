@@ -46,13 +46,18 @@ func mainAction(c *cli.Context) error {
 func runRetransmit(c *cli.Context) error {
 	duration := c.Int(cliFlagDuration)
 	outputFmt := c.String(cliFlagOutput)
+	maxEventsPerSecond := c.Uint64(cliFlagMaxEventsPerSecond)
 
 	if err := bpf.NewManager(&bpf.Option{KeepaliveTimeout: duration}); err != nil {
 		return fmt.Errorf("tcpshark: init bpf manager: %w", err)
 	}
 	defer bpf.Close()
 
-	bpfObj, err := loadTCPRetransBPFWithFilter(c.String(cliFlagBpfPath), c.String(cliFlagFilter))
+	bpfObj, err := loadTCPRetransBPFWithFilter(
+		c.String(cliFlagBpfPath),
+		c.String(cliFlagFilter),
+		maxEventsPerSecond,
+	)
 	if err != nil {
 		return fmt.Errorf("tcpshark: load retransmit bpf: %w", err)
 	}
@@ -78,6 +83,16 @@ func runRetransmit(c *cli.Context) error {
 		case <-runCtx.Done():
 		}
 	}()
+
+	if maxEventsPerSecond > 0 {
+		rlReader, err := eventRateLimiter.OpenEventPipe(runCtx, bpfObj)
+		if err != nil {
+			return err
+		}
+		defer rlReader.Close()
+
+		go eventRateLimiter.ReadEvents(runCtx, rlReader, maxEventsPerSecond)
+	}
 
 	reader, err := attachRetransmitPrograms(
 		runCtx,

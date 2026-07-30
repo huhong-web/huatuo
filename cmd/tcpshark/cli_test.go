@@ -116,6 +116,48 @@ func TestAppTLPFlag(t *testing.T) {
 	}
 }
 
+func TestAppRateLimitFlag(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name     string
+		args     []string
+		expected uint64
+	}{
+		{
+			name: "disabled by default",
+		},
+		{
+			name:     "explicit limit",
+			args:     []string{"--max-events-per-second", "100"},
+			expected: 100,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			var maxEventsPerSecond uint64
+			app := newTestApp(func(c *cli.Context) error {
+				maxEventsPerSecond = c.Uint64(cliFlagMaxEventsPerSecond)
+				return nil
+			})
+			args := []string{
+				"tcpshark", "--mode", "retransmit", "--bpf-path", "unused.o",
+			}
+			args = append(args, tt.args...)
+
+			if err := app.Run(args); err != nil {
+				t.Fatalf("Run() error = %v", err)
+			}
+			if maxEventsPerSecond != tt.expected {
+				t.Fatalf("max events/sec = %d, want %d", maxEventsPerSecond, tt.expected)
+			}
+		})
+	}
+}
+
 func newTestApp(action cli.ActionFunc) *cli.App {
 	app := newApp()
 	app.Action = action
