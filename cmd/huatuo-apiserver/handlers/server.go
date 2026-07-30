@@ -18,7 +18,6 @@ import (
 	"context"
 	"errors"
 	"net"
-	"time"
 
 	"huatuo-bamai/cmd/huatuo-apiserver/handlers/profiling"
 	"huatuo-bamai/cmd/huatuo-apiserver/handlers/trace"
@@ -42,12 +41,6 @@ type ServerOptions struct {
 	VersionInfo         *version.Info
 	RateLimit           rate.Limit
 	RateBurst           int
-	ReadHeaderTimeout   time.Duration
-	ReadTimeout         time.Duration
-	WriteTimeout        time.Duration
-	IdleTimeout         time.Duration
-	MaxHeaderBytes      int
-	MaxBodyBytes        int64
 	Ready               func(context.Context) error
 }
 
@@ -67,9 +60,6 @@ func Start(opts *ServerOptions) (RunningServer, error) {
 	if opts.TraceJobManager == nil || opts.ProfilingJobManager == nil {
 		return nil, errors.New("start API server: job managers are required")
 	}
-	if opts.ProfileService == nil {
-		return nil, errors.New("start API server: profile service is required")
-	}
 	httpServer := server.NewServer(&server.Config{
 		RequireAuth:     true,
 		EnablePProf:     opts.EnablePProf,
@@ -80,15 +70,9 @@ func Start(opts *ServerOptions) (RunningServer, error) {
 		AdminPaths: []string{
 			"/v1/profiles/flamegraph/**",
 		},
-		PromReg:           opts.PromReg,
-		VersionInfo:       opts.VersionInfo,
-		ReadHeaderTimeout: opts.ReadHeaderTimeout,
-		ReadTimeout:       opts.ReadTimeout,
-		WriteTimeout:      opts.WriteTimeout,
-		IdleTimeout:       opts.IdleTimeout,
-		MaxHeaderBytes:    opts.MaxHeaderBytes,
-		MaxBodyBytes:      opts.MaxBodyBytes,
-		Ready:             opts.Ready,
+		PromReg:     opts.PromReg,
+		VersionInfo: opts.VersionInfo,
+		Ready:       opts.Ready,
 	})
 
 	// Register trace routes

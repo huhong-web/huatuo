@@ -18,7 +18,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"time"
 
 	"huatuo-bamai/cmd/huatuo-apiserver/config"
 	"huatuo-bamai/cmd/huatuo-apiserver/handlers"
@@ -29,31 +28,33 @@ import (
 )
 
 func startHandlers(_ context.Context, d *Daemon) (func(context.Context) error, error) {
+	var profileQueryService profiling.ProfileQueryService
+	if d.profileService != nil {
+		profileQueryService = d.profileService
+	}
+
 	runningServer, err := handlers.Start(&handlers.ServerOptions{
-		Addr:                d.opts.Config.APIServer.TCPAddr,
+		Addr:                d.opts.Config.APIServer.ListenAddress,
 		PromReg:             d.metrics,
 		TraceJobManager:     d.jobManager,
 		ProfilingJobManager: d.jobManager,
-		ProfileService:      d.profileService,
+		ProfileService:      profileQueryService,
 		ProfilingConfig: profiling.Config{
-			AggregationInterval: d.opts.Config.Profiling.AggregationInterval,
-			ExecutionTimeout:    d.opts.Config.Profiling.ExecutionTimeout,
-			MaxProfilerProcs:    d.opts.Config.Profiling.MaxProfilerProcs,
-			FlameGraphBaseURL:   d.opts.Config.Profiling.FlameGraphBaseURL,
+			AggregationIntervalSeconds:     d.opts.Config.Profiling.AggregationIntervalSeconds,
+			MaxConcurrentProfilerProcesses: d.opts.Config.Profiling.MaxConcurrentProfilerProcesses,
+			DashboardBaseURL:               d.opts.Config.Profiling.DashboardBaseURL,
 		},
-		AuthUsers:         authUsers(d.opts.Config.Auth.Users),
-		EnablePProf:       d.opts.EnablePProf,
-		VersionInfo:       &d.opts.VersionInfo,
-		RateLimit:         rate.Limit(d.opts.Config.APIServer.RateLimit),
-		RateBurst:         d.opts.Config.APIServer.RateBurst,
-		ReadHeaderTimeout: time.Duration(d.opts.Config.APIServer.ReadHeaderTimeoutSeconds) * time.Second,
-		ReadTimeout:       time.Duration(d.opts.Config.APIServer.ReadTimeoutSeconds) * time.Second,
-		WriteTimeout:      time.Duration(d.opts.Config.APIServer.WriteTimeoutSeconds) * time.Second,
-		IdleTimeout:       time.Duration(d.opts.Config.APIServer.IdleTimeoutSeconds) * time.Second,
-		MaxHeaderBytes:    d.opts.Config.APIServer.MaxHeaderBytes,
-		MaxBodyBytes:      d.opts.Config.APIServer.MaxBodyBytes,
+		AuthUsers:   authUsers(d.opts.Config.Auth.Users),
+		EnablePProf: d.opts.EnablePProf,
+		VersionInfo: &d.opts.VersionInfo,
+		RateLimit:   rate.Limit(d.opts.Config.APIServer.RateLimit.RequestsPerSecond),
+		RateBurst:   d.opts.Config.APIServer.RateLimit.Burst,
 		Ready: func(ctx context.Context) error {
-			return errors.Join(d.jobManager.Ready(ctx), d.profileService.Ready(ctx))
+			err := d.jobManager.Ready(ctx)
+			if d.profileService == nil {
+				return err
+			}
+			return errors.Join(err, d.profileService.Ready(ctx))
 		},
 	})
 	if err != nil {
@@ -69,9 +70,9 @@ func authUsers(users []config.UserConfig) []server.UserConfig {
 	for _, user := range users {
 		result = append(result, server.UserConfig{
 			ID:          user.ID,
-			Name:        user.Name,
+			BearerToken: user.BearerToken,
 			Permissions: user.Permissions,
-			IsAdmin:     user.IsAdmin,
+			IsAdmin:     user.Admin,
 		})
 	}
 	return result

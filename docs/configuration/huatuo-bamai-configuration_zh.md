@@ -3,7 +3,7 @@ title: huatuo-bamai 配置
 type: docs
 description:
 author: HUATUO Team
-date: 2026-03-29
+date: 2026-07-27
 weight: 4
 ---
 
@@ -18,13 +18,17 @@ weight: 4
 ### 2. 全局黑名单
 
 ```bash
-# The global blacklist for tracing and metrics
-BlackList = ["netdev_hw", "metax_gpu", "ascend_npu", "tcp_retransmit"]
+# Global tracing and metrics configuration.
+#
+# - BlackList
+# Global blacklist for tracing and metrics.
+#
+BlackList = ["netdev_hw", "metax_gpu", "ascend_npu", "diskio", "tcp_retransmit"]
 ```
 
-- **BlackList**：全局追踪与指标黑名单。 
+- **BlackList**：全局追踪与指标黑名单。
 
-  用于排除特定模块或追踪和指标采集，避免无关噪声或高开销探针。默认名单包含 `tcp_retransmit`，因此 TCP 重传追踪及其丢包关联缓存默认关闭；从名单中移除 `tcp_retransmit` 并重启 `huatuo-bamai` 后才会启用。
+  用于排除特定模块的追踪和指标采集，避免无关噪声或高开销探针。默认值为 `["netdev_hw", "metax_gpu", "ascend_npu", "diskio", "tcp_retransmit"]`，即全局禁用网络设备硬件层（netdev_hw）、Metax GPU、Ascend NPU、基于 procfs 的磁盘 I/O 指标和 TCP 重传追踪。需要启用磁盘 I/O 指标时从黑名单中移除 `diskio`；需要启用 TCP 重传追踪及其丢包关联缓存时移除 `tcp_retransmit`。
 
   **说明**：添加黑名单项可有效降低资源消耗，尤其在特定硬件环境中；支持数组格式，可根据实际业务扩展。
 
@@ -32,19 +36,18 @@ BlackList = ["netdev_hw", "metax_gpu", "ascend_npu", "tcp_retransmit"]
 
 ```bash
 # Log Configuration
-#
-# - Level
-# The log level for huatuo-bamai: Debug, Info, Warn, Error, Panic.
-# Default: Info
-#
-# - File
-# Store logs to where the logging file is. If it is empty, don't write log
-# to any file.
-# Default: empty
-#
 [Log]
-	# Level = "Info"
-	# File = ""
+    # - Level
+    # The log level for huatuo-bamai: Debug, Info, Warn, Error, Panic.
+    # Default: Info
+    #
+    # - File
+    # Store logs to where the logging file is. If it is empty, don't write log
+    # to any file.
+    # Default: empty
+    #
+    # Level = "Info"
+    # File = ""
 ```
 
 - **Level**：日志级别。 
@@ -62,47 +65,79 @@ BlackList = ["netdev_hw", "metax_gpu", "ascend_npu", "tcp_retransmit"]
 ### 4. 运行时资源限制
 
 ```bash
-# Runtime resource limit
-#
-# - LimitInitCPU
-# During the huatuo-bamai startup, the CPU of process are restricted from use.
-# Default is 0.5 CPU.
-#
-# - LimitCPU
-# The CPU resource restricted once the process starts.
-# Default is 2.0 CPU.
-#
-# - LimitMem
-# The memory resource limited for huatuo-bamai process.
-# Default is 2048MB.
-#
-[RuntimeCgroup]
-	# LimitInitCPU = 0.5
-	# LimitCPU = 2.0
-	# LimitMem = 2048
+# Runtime limits for the huatuo-bamai process.
+[Runtime]
+    # - StartupCPULimitCores
+    # CPU limit during startup, in cores.
+    # Default: 0.5
+    #
+    # - CPULimitCores
+    # CPU limit after startup, in cores.
+    # Default: 2.0
+    #
+    # - MemoryLimitMiB
+    # Memory limit in MiB.
+    # Default: 2048
+    #
+    # StartupCPULimitCores = 0.5
+    # CPULimitCores = 2.0
+    # MemoryLimitMiB = 2048
 ```
 
-- **LimitInitCPU**：启动阶段 CPU 限制。
+- **StartupCPULimitCores**：初始化阶段 CPU 上限，默认 `0.5` 核。
+- **CPULimitCores**：启动完成后的 CPU 上限，默认 `2.0` 核。
+- **MemoryLimitMiB**：进程内存上限，默认 `2048` MiB。
 
-  huatuo-bamai 进程启动期间允许使用的 CPU 核数限制。默认值为 0.5 CPU。 
+配置始终以文档标明的单位保存，仅在应用 cgroup 限制时将内存转换为字节。
 
-  **说明**：防止启动过程占用过多 CPU 资源影响宿主机业务，单位为 CPU 核心数（支持小数）。
+### 5. HTTP 服务与任务
 
-- **LimitCPU**：运行时 CPU 限制。 
+```toml
+# HTTP server configuration.
+[HTTPServer]
+    # - ListenAddress
+    # Listen address in "host:port" form.
+    # Default: ":19704"
+    #
+    # - MaxEventStreamClients
+    # Maximum number of concurrent clients allowed to hold an open
+    # /v1/events/watch SSE connection. Once the limit is reached, new requests
+    # are rejected with HTTP 429 until an existing client disconnects.
+    # Default: 100
+    #
+    # - EventStreamKeepAliveIntervalSeconds
+    # Interval in seconds at which the server sends an SSE comment ping to each
+    # connected client. The ping keeps the connection alive through load
+    # balancers and proxies that would otherwise time out idle connections. If
+    # writing the ping fails three consecutive times, the server closes the
+    # connection.
+    # Default: 30
+    #
+    # ListenAddress = ":19704"
+    # MaxEventStreamClients = 100
+    # EventStreamKeepAliveIntervalSeconds = 30
 
-  进程正常运行后允许使用的 CPU 资源上限。默认值为 2.0 CPU。 
+# Locally running tracing tasks.
+[Tasks]
+    # - MaxConcurrent
+    # Maximum number of concurrent tasks.
+    # Default: 10
+    #
+    # MaxConcurrent = 10
+```
 
-  **说明**：根据节点规模和业务负载调整，推荐在高密度容器环境中适当降低以保障业务稳定性。
+- **ListenAddress** 使用 `host:port` 格式，主机为空时监听所有接口。
+- **MaxConcurrent** 限制本机同时运行的追踪任务数量。
 
-- **LimitMem**：内存资源限制。 
+事件流配置控制 `POST /v1/events/watch`。达到
+`MaxEventStreamClients` 后，新连接返回 HTTP 429。
+`EventStreamKeepAliveIntervalSeconds` 控制 SSE 心跳注释间隔，用于避免
+代理或负载均衡器关闭空闲连接。连续三次写入失败后服务端关闭连接。
+该值应小于上游 idle timeout，生产环境通常设置为 15–60 秒。
 
-  huatuo-bamai 进程可使用的最大内存量。默认值为 2048 MB。
+### 6. 存储配置
 
-  **说明**：单位为 MB，用于通过 cgroup 限制内存占用，防止 OOM（Out Of Memory）风险。生产环境可根据实际采集规模适当增加。
-
-### 5. 存储配置
-
-#### 5.1 ElasticSearch/OpenSearch 存储
+#### 6.1 ElasticSearch/OpenSearch 存储
 
 ```bash
 # Storage configuration
@@ -113,15 +148,10 @@ BlackList = ["netdev_hw", "metax_gpu", "ascend_npu", "tcp_retransmit"]
     # Store the tracing and events data of linux kernel to ES/OS.
     #
     # - Address
-    # Default address is :9200 of localhost. Port 9200 is used for all API calls
-    # over HTTP. This includes search and aggregations, monitoring and anything
-    # else that uses a HTTP or HTTPS request. All client libraries will use this port to
-    # talk to Elasticsearch or OpenSearch.
+    # Port 9200 is commonly used for Elasticsearch/OpenSearch HTTP APIs.
     # e.g.
     # http://127.0.0.1:9200
     # https://127.0.0.1:9200
-    #
-    # Default: :9200
     #
     # - Index
     # Elasticsearch or OpenSearch index, a logical namespace that holds a collection of
@@ -130,20 +160,23 @@ BlackList = ["netdev_hw", "metax_gpu", "ascend_npu", "tcp_retransmit"]
     #
     # - Username
     # - Password
-    # There is no default username and password.
+    # Address, Username, and Password must be either all empty (disabled) or
+    # all configured (enabled). Partial connection settings are invalid.
     #
-    [Storage.ES]
+    [Storage.Elasticsearch]
         # Address = "http://127.0.0.1:9200"
         # Index = "huatuo_bamai"
-        Username = "elastic"
-        Password = "huatuo-bamai"
+        # Username = "elastic"
+        # Password = "REPLACE_WITH_PASSWORD"
 ```
 
 - **Address**：ElasticSearch/OpenSearch 存储服务地址。 
 
-  默认值为 http://127.0.0.1:9200。 
+  无默认值。
 
-  **说明**：用于存储内核追踪和事件数据。如果 Address、Username 或 Password 中任一项为空，则禁用 ES/OS 存储。支持 HTTP/HTTPS 协议。
+  **说明**：用于存储内核追踪和事件数据。Address、Username、Password
+  三项全部为空时禁用 ES/OS 存储；启用时必须三项全部配置，部分配置会
+  导致进程启动失败。支持 HTTP/HTTPS 协议。
 
 - **Index**：索引名称。
 
@@ -153,19 +186,19 @@ BlackList = ["netdev_hw", "metax_gpu", "ascend_npu", "tcp_retransmit"]
 
 - **Username**：用户名。
 
-  无默认值（示例中使用 elastic）。
+  无默认值。
 
   **说明**：用于 Basic Auth 认证。
 
 - **Password**：认证密码。
 
-  无默认值（示例中使用 huatuo-bamai）。
+  无默认值。
 
   **说明**：配合用户名进行安全认证。生产环境强烈建议使用强密码并结合 TLS 加密传输。
 
 **整体说明**：ES/OS 存储用于持久化内核追踪和事件数据，便于后续检索与分析。如果用户不关心 Linux 内核事件、Autotracing 数据则可以关闭该配置。
 
-#### 5.2 本地文件存储
+#### 6.2 本地文件存储
 
 ```bash
 # LocalFile Storage
@@ -176,19 +209,19 @@ BlackList = ["netdev_hw", "metax_gpu", "ascend_npu", "tcp_retransmit"]
 # The directory for storing data. If the Path is empty, LocalFile will be disabled.
 # Default: "huatuo-local"
 #
-# - RotationSize
+# - RotationSizeMiB
 # The maximum size in Megabytes of a record file before it gets rotated
 # for per linux kernel tracer.
 # Default: 100MB
 #
-# - MaxRotation
+# - MaxRotatedFiles
 # The maximum number of old log files to retain for per tracer.
 # Default: 10
 #
 [Storage.LocalFile]
 	# Path = "huatuo-local"
-	# RotationSize = 100
-	# MaxRotation = 10
+    # RotationSizeMiB = 100
+    # MaxRotatedFiles = 10
 ```
 
 - **Path**：本地数据存储目录。
@@ -197,23 +230,23 @@ BlackList = ["netdev_hw", "metax_gpu", "ascend_npu", "tcp_retransmit"]
 
   **说明**：用于在宿主机本地保存数据，主要用于现场故障排查。推荐配置为绝对路径。
 
-- **RotationSize**：单文件轮转大小。
+- **RotationSizeMiB**：单文件轮转大小。
 
   每个追踪器记录文件在达到该大小时进行轮转。默认值为 100 MB。
 
   **说明**：单位为 MB，防止单个文件过大导致磁盘占用失控。
 
-- **MaxRotation**：最大保留轮转文件数。
+- **MaxRotatedFiles**：最大保留轮转文件数。
 
   每个追踪器最多保留的历史文件数量。默认值为 10。
 
   **说明**：超过数量后自动删除最早文件，控制磁盘空间使用。
 
-### 6. 自动追踪配置
+### 7. 自动追踪配置
 
 自动追踪模块是 HUATUO 的智能特性之一，可根据阈值自动触发特定性能追踪，减少人工干预。
 
-#### 6.1 CPUIdle 自动追踪 — 容器突发高 CPU 使用场景
+#### 7.1 CPUIdle 自动追踪 — 容器突发高 CPU 使用场景
 
 ```bash
 # Autotracing configuration 
@@ -343,7 +376,7 @@ BlackList = ["netdev_hw", "metax_gpu", "ascend_npu", "tcp_retransmit"]
 
   默认无规则，监控所有容器。
 
-#### 6.2 CPUSys 自动追踪 — 宿主机突发高系统 CPU 使用场景
+#### 7.2 CPUSys 自动追踪 — 宿主机突发高系统 CPU 使用场景
 
 ```bash
 # cpusys
@@ -363,6 +396,10 @@ BlackList = ["netdev_hw", "metax_gpu", "ascend_npu", "tcp_retransmit"]
 # The sample interval of the cpu usage for host machine.
 # Default: 10s
 #
+# - IntervalTracing
+# Minimum time between profiling runs.
+# Default: 1800s
+#
 # - RunTracingToolTimeout
 # The executing time of this tracing program.
 # Default: 10s
@@ -375,6 +412,7 @@ BlackList = ["netdev_hw", "metax_gpu", "ascend_npu", "tcp_retransmit"]
 	# SysThreshold = 45
 	# DeltaSysThreshold = 20
 	# Interval = 10
+	# IntervalTracing = 1800
 	# RunTracingToolTimeout = 10
 ```
 
@@ -390,11 +428,13 @@ BlackList = ["netdev_hw", "metax_gpu", "ascend_npu", "tcp_retransmit"]
 
   默认 10s。
 
+- **IntervalTracing**：两次性能剖析之间的最短间隔，默认 1800s。
+
 - **RunTracingToolTimeout**：单次追踪执行超时时间（秒）。默认 10s。
 
 **触发逻辑**：当 SysThreshold 与 DeltaSysThreshold 同时满足时触发。
 
-#### 6.3 Dload 自动追踪 — 容器 D 状态任务剖析
+#### 7.3 Dload 自动追踪 — 容器 D 状态任务剖析
 
 ```bash
 # dload
@@ -435,7 +475,7 @@ BlackList = ["netdev_hw", "metax_gpu", "ascend_npu", "tcp_retransmit"]
 
   默认 1800s（30 分钟）。 两次自动追踪之间的最小间隔，防止频繁执行对系统造成压力。
 
-#### 6.4 IOTracing 自动追踪 — 容器 IO 性能剖析
+#### 7.4 IOTracing 自动追踪 — 容器 IO 性能剖析
 
 ```bash
 # iotracing
@@ -513,7 +553,7 @@ BlackList = ["netdev_hw", "metax_gpu", "ascend_npu", "tcp_retransmit"]
 
 **说明**：IOTracing 用于容器 IO 热点诊断，特别关注高负载磁盘场景。
 
-#### 6.5 内存突发自动追踪
+#### 7.5 内存突发自动追踪
 
 该模块用于检测宿主机内存使用量突发增长场景，并在触发时自动捕获内核上下文，便于诊断内存压力事件。
 
@@ -584,11 +624,16 @@ BlackList = ["netdev_hw", "metax_gpu", "ascend_npu", "tcp_retransmit"]
 
   **说明**：控制输出数据量，避免单次事件产生过多诊断信息。
 
-#### 6.6 已知问题过滤（IssuesList）
+#### 7.6 已知问题过滤（IssuesList）
 
 ```bash
-# IssuesList for known issue filtering in autotracing
-IssuesList = []
+# Autotracing configuration.
+#
+# - IssuesList
+# Known issue filters for autotracing.
+#
+[AutoTracing]
+    IssuesList = []
 ```
 
 - **IssuesList**：已知问题过滤器。格式 `[["问题名称", "正则"], ...]`。采集到的堆栈匹配正则时标记为对应问题名称，默认 `[]`。当前用于 dload 追踪。
@@ -597,11 +642,11 @@ IssuesList = []
 
 **注意**：当前仅支持 `dload` 追踪的已知问题过滤，其他事件暂不支持。
 
-### 7. 事件追踪配置
+### 8. 事件追踪配置
 
 该 section 负责内核关键事件的捕获与延迟监控，包括软中断、内存回收、网络接收延迟、网卡事件及丢包监控等，是 HUATUO 内核级异常上下文采集的核心模块。
 
-#### 7.1 软中断禁用追踪
+#### 8.1 软中断禁用追踪
 
 ```bash
 # linux kernel events capturing configuration
@@ -621,7 +666,7 @@ IssuesList = []
 
 - **DisabledThreshold**：软中断禁用持续时间阈值（纳秒）。默认 10000000 ns（10ms）。 当内核软中断被禁用时间超过该阈值时，huatuo-bamai 将自动采集内核上下文。 说明：软中断长时间禁用可能导致网络、定时器等延迟，适合诊断中断风暴或高负载场景。
 
-#### 7.2 内存回收阻塞追踪
+#### 8.2 内存回收阻塞追踪
 
 ```bash
 # memreclaim
@@ -639,7 +684,7 @@ IssuesList = []
 
 - **BlockedThreshold**：内存回收阻塞时间阈值（纳秒）。默认 900000000 ns（900ms）。 当单个进程因内存回收（reclaim）被阻塞超过该时间时，向用户态上报事件并捕获上下文。 说明：内存回收阻塞是导致进程卡顿的常见原因，尤其在内存紧张的云原生环境中。
 
-#### 7.3 网络接收延迟追踪
+#### 8.3 网络接收延迟追踪
 
 ```bash
 # networking rx latency
@@ -700,7 +745,7 @@ IssuesList = []
 
   **说明**：聚焦容器网络流量，减少无关宿主机数据干扰。
 
-#### 7.4 网卡事件监控
+#### 8.4 网卡事件监控
 
 ```bash
 # netdev events
@@ -721,7 +766,7 @@ IssuesList = []
 
   **说明**：精确指定感兴趣的网络接口，支持 bond、lo 等。
 
-#### 7.5 丢包监控（[EventTracing.Dropwatch]）
+#### 8.5 丢包监控（[EventTracing.Dropwatch]）
 
 ```bash
 # dropwatch
@@ -742,7 +787,7 @@ IssuesList = []
 
   **说明**：邻居表相关丢包通常为正常行为，排除可减少误报。
 
-#### 7.6 TCP 重传追踪（[EventTracing.TCPRetransmit]）
+#### 8.6 TCP 重传追踪（[EventTracing.TCPRetransmit]）
 
 ```bash
 [EventTracing.TCPRetransmit]
@@ -771,7 +816,7 @@ IssuesList = []
 
   默认 100，设置为 0 表示不限速。超限时 `tcpshark` 会输出 `rate limit hit` 日志。
 
-#### 7.7 硬件错误事件追踪（EventTracing.Ras）
+#### 8.7 硬件错误事件追踪（EventTracing.Ras）
 
 ```bash
 # ras
@@ -795,11 +840,16 @@ IssuesList = []
 
   **说明**：THR 事件由 CPU 本地 APIC 阈值中断触发，在硬件出现纠正性错误时可能以极高频率产生。该冷却时间用于防止存储系统被大量重复记录淹没，同时保证关键事件仍能被捕获。调低该值可获得更实时的事件记录，但需注意存储压力；在错误频发的环境中建议适当调高。
 
-#### 7.8 已知问题过滤（IssuesList）
+#### 8.8 已知问题过滤（IssuesList）
 
 ```bash
-# IssuesList for known issue filtering in event tracing
-IssuesList = []
+# Linux kernel event tracing configuration.
+#
+# - IssuesList
+# Known issue filters for event tracing.
+#
+[EventTracing]
+    IssuesList = []
 ```
 
 - **IssuesList**：已知问题过滤器。格式和用法同 AutoTracing 的 `IssuesList`。匹配事件上下文，标记为对应问题名称，默认 `[]`。
@@ -808,7 +858,7 @@ IssuesList = []
 
 **注意**：当前仅支持 `net_rx_latency` 事件的过滤，其他事件暂不支持。
 
-### 8. 指标采集器配置
+### 9. 指标采集器配置
 
 该 section 定义各类系统与网络指标的采集规则。所有 `Included`/`Excluded` 字段底层共用同一套过滤逻辑（正则表达式）：
 
@@ -817,7 +867,7 @@ IssuesList = []
 - 仅 Included：白名单，仅采集匹配项
 - 两者并存：必须匹配 Included 且不匹配 Excluded
 
-#### 8.1 网卡统计
+#### 9.1 网卡统计
 
 ```bash
 # Metric Collector
@@ -855,7 +905,7 @@ IssuesList = []
 
 - **DeviceExcluded**：需排除的网卡设备正则。如：排除 lo、docker、veth 等虚拟接口。
 
-#### 8.2 网卡 DCB（Data Center Bridging）采集
+#### 9.2 网卡 DCB（Data Center Bridging）采集
 
 ```bash
 # netdev dcb, DCB (Data Center Bridging)
@@ -876,7 +926,7 @@ IssuesList = []
 
   **说明**：主要用于数据中心网络环境下的优先级流控监控。
 
-#### 8.3 网卡硬件统计
+#### 9.3 网卡硬件统计
 
 ```bash
 # netdev hardware statistic
@@ -897,7 +947,7 @@ IssuesList = []
 
   **说明**：聚焦硬件丢包、错误等底层指标。
 
-#### 8.4 Qdisc（队列规则）采集
+#### 9.4 Qdisc（队列规则）采集
 
 ```bash
 # Qdisc
@@ -914,7 +964,7 @@ IssuesList = []
 
   **说明**：用于诊断流量整形、调度延迟等问题。
 
-#### 8.5 vmstat 指标采集
+#### 9.5 vmstat 指标采集
 
 ```bash
 # vmstat
@@ -936,7 +986,7 @@ IssuesList = []
 
   **说明**：精细控制 vmstat 指标采集，支持主机与容器差异化配置，避免采集无关字段。
 
-#### 8.6 其他指标采集
+#### 9.6 其他指标采集
 
 ```bash
 # MemoryEvents/Netstat/MountPointStat
@@ -962,7 +1012,7 @@ IssuesList = []
 
   **说明**：用于监控关键文件系统使用情况。
 
-### 9. Pod 配置
+### 10. Pod 配置
 
 该 section 用于从 kubelet 获取 Pod 信息，实现容器与 Pod 级别的标签关联和指标隔离。
 
@@ -1014,47 +1064,6 @@ IssuesList = []
 
   **说明**：参考 Kubernetes 证书最佳实践，用于 HTTPS 端口的 mTLS 认证。在裸金属或非 Kubernetes 环境中可通过将两个端口设为 0 来禁用 Pod 获取功能。
 
-### 10. 事件监听配置
-
-该 section 用于控制 `POST /v1/events/watch` SSE 流式接口的运行行为，外部客户端可通过该接口实时订阅内核事件数据流。
-
-```bash
-# Events Watch Configuration
-#
-# Controls the behavior of the POST /v1/events/watch SSE streaming API,
-# which allows external clients to subscribe to kernel events in real-time.
-#
-# - MaxClients
-# Maximum number of concurrent clients allowed to hold an open /v1/events/watch
-# connection. Once the limit is reached, new requests are rejected with HTTP 429
-# (Too Many Requests) until an existing client disconnects.
-# Default: 100
-#
-# - KeepAliveInterval
-# Interval in seconds at which the server sends an SSE comment ping to each
-# connected client. The ping keeps the HTTP connection alive through load
-# balancers and proxies that would otherwise time out idle connections.
-# If writing the ping fails three consecutive times the server treats the
-# client as gone and closes the connection.
-# Default: 30s
-#
-[EventsWatch]
-    # MaxClients = 100
-    # KeepAliveInterval = 30
-```
-
-- **MaxClients**：最大并发客户端连接数。
-
-  默认 100。允许同时持有 `/v1/events/watch` 长连接的客户端上限。当连接数达到该值时，新请求将以 HTTP 429（Too Many Requests）被拒绝，直到已有客户端断开连接后方可接入。
-
-  **说明**：根据节点资源和实际订阅方数量合理调整。每个长连接会占用一个 goroutine 和一个订阅通道（缓冲 256 条），连接数过多时注意内存压力。
-
-- **KeepAliveInterval**：探活心跳间隔（秒）。
-
-  默认 30s。服务端每隔该时间向已连接客户端发送一条 SSE 注释行（`": ping"`）以维持 HTTP 长连接，防止负载均衡器或代理因连接空闲而超时断开。
-
-  **说明**：若服务端连续 3 次写入探活消息（或事件数据）均失败，则视为客户端已断开并主动关闭连接，释放相关资源。建议该值不超过上游代理的 idle timeout，生产环境常见值为 15–60s。
-
 ### 11. 命令行参数
 
 `huatuo-bamai` 支持以下命令行参数：
@@ -1097,7 +1106,7 @@ huatuo-bamai --region <region> [选项]
 
 ### 13. 配置最佳实践与注意事项
 
-- **资源控制**：生产环境优先调整 RuntimeCgroup 中的 CPU 和内存限制，避免影响业务容器。
+- **资源控制**：生产环境优先调整 `[Runtime]` 中的 CPU 和内存限制，避免影响业务容器。
 - **存储选择**：小规模部署可优先使用 LocalFile 进行本地排查；大规模集群推荐配置 Elasticsearch 实现集中存储与查询。
 - **自动追踪调优**：根据业务负载特征调整阈值，过低阈值会导致频繁触发，过高则可能遗漏问题。建议在测试环境逐步验证。
 - **安全性**：ES 配置中请使用强密码，并考虑启用 HTTPS；避免在配置文件中硬编码敏感信息。

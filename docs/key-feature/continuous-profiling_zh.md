@@ -13,23 +13,156 @@ HUATUO（华佗）是由滴滴开源并依托 CCF（中国计算机学会）孵�
 </div>
 {{% /alert %}}
 
+## 🚀 快速上手
+
+示例基于仓库根目录下的 `build/docker/docker-compose.yml`，从零开始完成一次宿主机 CPU 性能剖析，并在 Grafana 中选择时间范围分析火焰图。
+
+### 1. 启动服务
+
+先修改配置，确保 huatuo-bamai 和 huatuo-apiserver 有写入 ES 的能力，才能正常保存 profile 数据。配置文件通过 docker compose 挂载到容器中，因此直接修改项目根目录下的文件即可。
+
+huatuo-bamai.conf 中配置：
+```toml
+[Storage]
+    [Storage.Elasticsearch]
+        Address = "http://127.0.0.1:9200"
+        Index = "huatuo_bamai"
+        Username = "elastic"
+        Password = "huatuo-bamai"
+```
+
+huatuo-apiserver.conf 中配置：
+```toml
+[Elasticsearch]
+    Address = "http://127.0.0.1:9200"
+    Username = "elastic"
+    Password = "huatuo-bamai"
+    Index = "huatuo_bamai"
+
+[Auth]
+    [[Auth.Users]]
+        ID = "administrator"
+        BearerToken = "REPLACE_WITH_RANDOM_HEX"
+        Admin = true
+```
+
+然后项目根目录执行：
+
+```bash
+docker compose --project-directory ./build/docker up
+```
+
+> 不加 `-d`，方便观察各组件启动日志。如需后台运行可另开终端操作，或自行加 `-d`。
+
+启动后运行的组件及作用：
+
+| 服务 | 作用 | 默认端口 |
+| --- | --- | --- |
+| `huatuo-bamai` | 采集 Agent，执行 profiler 采样 | `19704` |
+| `huatuo-apiserver` | API 入口，创建任务、下发、查询火焰图 | `12740` |
+| `elasticsearch` | 存储 profile 数据（index：`huatuo_bamai`） | `9200` |
+| `grafana` | 火焰图面板展示 | `3000` |
+
+### 2. 确认服务就绪
+
+新开一个终端，执行以下命令确认服务就绪：
+
+```bash
+# Agent 健康检查
+$ curl -s http://localhost:19704/version | jq .data.name
+
+"huatuo-bamai"
+
+# API Server 健康检查
+$ curl -s http://localhost:12740/version | jq .data.name
+
+"huatuo-apiserver"
+
+# ES 索引状态
+$ curl -s -u elastic:huatuo-bamai "http://localhost:9200/_cat/indices/huatuo_bamai?v"
+
+health status index        uuid                   pri rep docs.count docs.deleted store.size pri.store.size dataset.size
+yellow open   huatuo_bamai 147fzHJhQ820GjCKFLh5ZQ   1   1         42            0    297.8kb        297.8kb      297.8kb
+```
+
+设置环境变量便于后续调用：
+
+```bash
+API_BASE="http://127.0.0.1:12740"
+API_TOKEN="REPLACE_WITH_RANDOM_HEX"
+```
+
+
+### 3. 创建宿主机 CPU 剖析任务
+
+以 `c` 语言（原生，覆盖 C/C++/Go 等）为例，对宿主机整体采样 30 秒：
+
+```bash
+# hostname 需要使用节点的实际主机名
+HOSTNAME=$(hostname)
+
+JOB_ID=$(curl -s -X POST \
+  -H "Authorization: Bearer ${API_TOKEN}" \
+  -H "Content-Type: application/json" \
+  -d "{
+    \"type\": \"cpu\",
+    \"language\": \"c\",
+    \"duration_seconds\": 30,
+    \"hostname\": \"${HOSTNAME}\"
+  }" \
+  "${API_BASE}/v1/profiles" | jq -r .data.id)
+
+echo "Job ID: $JOB_ID"
+```
+
+### 4. 验证数据已写入 ES
+
+每 10 秒生成一个聚合窗口，30 秒任务约产生 3 条采样数据，等待 30 秒后确认数据写入：
+
+```bash
+$ curl -s -u elastic:huatuo-bamai "http://localhost:9200/huatuo_bamai/_count" \
+  -H "Content-Type: application/json" \
+  -d '{"query":{"exists":{"field":"tracer_data.flamedata"}}}' | jq .count
+
+3
+```
+
+### 5. Grafana 面板查看火焰图
+
+示例是对本机进行剖析，打开 **Continuous Profiling (host)** 面板（容器是独立的面板）：
+
+- 地址：[http://localhost:3000/d/continuous-profiling-host](http://localhost:3000/d/continuous-profiling-host) （根据实际环境地址替换 `localhost:3000`）
+- 账号/密码：`admin / admin` （首次登陆提示修改默认账号密码，暂时跳过即可）
+
+操作步骤：
+
+1. 右上角选择时间范围，确保覆盖采样时间段
+2. 变量栏选择输入你的 `hostname` 和 选择 `type` 为 `process_cpu:cpu:nanoseconds:cpu:nanoseconds`
+3. 火焰图面板自动加载该时间窗口的聚合调用栈，随选择时间范围变化而自动聚合更新，focus block 可选定关心的调用栈
+4. symbol 排序、统计、筛选等操作在 top table 中进行，选择 Both 可展示
+
+![continuous-profiling-grafana-host.png](/docs/img/continuous-profiling-grafana-host.png)
+
+其他更多丰富维度的剖析任务参考 Profiles API。
+
+
 ## 🌐 Profiles API
 
 huatuo-apiserver 通过 `/v1/profiles` 提供服务化的持续性能剖析能力。客户端可以创建 CPU 或内存剖析任务，查询任务状态和结果，或者停止、删除任务。任务由 huatuo-apiserver 调度到指定节点的 HUATUO Agent，采集结果可通过返回的 Grafana 链接或原始数据接口查看。
 
 ### 1. 请求约定
 
-huatuo-apiserver 默认监听 `:12740`。以下示例使用环境变量统一设置服务地址和用户 ID：
+huatuo-apiserver 默认监听 `:12740`。以下示例使用环境变量统一设置服务地址和 Bearer token：
 
 ```bash
 API_BASE="http://127.0.0.1:12740"
-USER_ID="<Auth.users.ID>"
+API_TOKEN="REPLACE_WITH_RANDOM_HEX"
 ```
 
-每个请求必须在 `Authorization` 请求头中以 Bearer token 传入配置的用户 ID：
+每个请求必须在 `Authorization` 请求头中传入配置的 Bearer token：
 
 ```text
-Authorization: Bearer <Auth.users.ID>
+Authorization: Bearer REPLACE_WITH_RANDOM_HEX
 ```
 
 非管理员用户需要配置 `/v1/profiles` 和 `/v1/profiles/**` 权限。权限可带
@@ -49,7 +182,7 @@ HTTP 方法前缀，例如 `GET /v1/profiles/**`。接口使用统一 JSON 响�
 
 ```bash
 curl -sS \
-  -H "Authorization: Bearer ${USER_ID}" \
+  -H "Authorization: Bearer ${API_TOKEN}" \
   "${API_BASE}/v1/profiles/capabilities"
 ```
 
@@ -60,10 +193,9 @@ curl -sS \
 | `types` | 支持的剖析类型：`cpu`、`memory` |
 | `cpu_languages` | CPU 剖析支持的语言 |
 | `memory_languages` | 内存剖析支持的语言 |
-| `memory_modes` | 内存剖析模式；键用于界面展示，值用于创建任务 |
-| `aggregation_interval` | 服务端采集数据的聚合周期，单位为秒 |
-| `execution_timeout` | 单个 profiler 子进程的执行超时，单位为秒 |
-| `max_profiler_procs` | 第三方 profiler 子进程的最大并发数；`0` 表示不限制 |
+| `memory_modes` | 按语言分组的内存剖析模式；列表值可直接用于创建任务 |
+| `aggregation_interval_seconds` | 服务端采集数据的聚合周期 |
+| `max_concurrent_profilers` | profiler 进程的最大并发数；`0` 表示不限制 |
 
 当前 CPU 剖析支持 `c`、`c++`、`go`、`java` 和 `python`。内存剖析支持以下组合：
 
@@ -83,25 +215,25 @@ curl -sS \
 | --- | --- | --- |
 | `type` | 是 | 剖析类型：`cpu` 或 `memory` |
 | `language` | 是 | 目标进程语言，必须与剖析类型匹配 |
-| `duration` | 是 | 采集时长，单位为秒 |
+| `duration_seconds` | 是 | 采集时长，单位为秒 |
 | `hostname` | 是 | 运行目标进程的节点主机名，用于任务调度 |
 | `container_id` | 否 | 目标容器 ID；不传表示对宿主机剖析 |
 | `binary_match_path` | 否 | Java/Python CPU 剖析的目标可执行文件路径匹配条件；原生剖析不支持 |
 | `memory_mode` | 内存剖析必需 | 内存剖析模式，必须与 `language` 匹配 |
 
-`duration` 必须不小于两个 `aggregation_interval`，且 `duration + aggregation_interval` 必须小于 3600 秒。同一用户在同一节点上已有运行中的剖析任务时，服务端返回 `409 Conflict`。
+`duration_seconds` 必须不小于两个 `aggregation_interval_seconds`，且二者之和必须小于 3600 秒。同一用户在同一节点上已有运行中的剖析任务时，服务端返回 `409 Conflict`。
 
 创建宿主机 Go CPU 剖析任务：
 
 ```bash
 curl -sS -i \
   -X POST \
-  -H "Authorization: Bearer ${USER_ID}" \
+  -H "Authorization: Bearer ${API_TOKEN}" \
   -H "Content-Type: application/json" \
   -d '{
     "type": "cpu",
     "language": "go",
-    "duration": 60,
+    "duration_seconds": 60,
     "hostname": "node-01"
   }' \
   "${API_BASE}/v1/profiles"
@@ -112,13 +244,13 @@ curl -sS -i \
 ```bash
 curl -sS -i \
   -X POST \
-  -H "Authorization: Bearer ${USER_ID}" \
+  -H "Authorization: Bearer ${API_TOKEN}" \
   -H "Content-Type: application/json" \
   -d '{
     "type": "memory",
     "language": "java",
     "memory_mode": "object_usage",
-    "duration": 60,
+    "duration_seconds": 60,
     "container_id": "9f4c2f1a8b7d",
     "hostname": "node-01"
   }' \
@@ -153,19 +285,19 @@ JOB_ID="<profile-job-id>"
 | `type` | 无 | `cpu` 或 `memory`；不传时返回两种类型 |
 | `limit` | `50` | 每页数量，必须大于 0，最大为 500 |
 | `offset` | `0` | 起始偏移量，必须大于或等于 0 |
-| `sort` | `-start_time` | `start_time`、`end_time`、`host` 或 `container`；前置 `-` 表示降序 |
+| `sort` | `-created_at` | `created_at`、`finished_at`、`hostname`、`container_id`、`id`、`status` 或 `type`；前置 `-` 表示降序 |
 
 查询 `node-01` 上最新的 20 个运行中 CPU 剖析任务：
 
 ```bash
 curl -sS -G \
-  -H "Authorization: Bearer ${USER_ID}" \
+  -H "Authorization: Bearer ${API_TOKEN}" \
   --data-urlencode "hostname=node-01" \
   --data-urlencode "status=running" \
   --data-urlencode "type=cpu" \
   --data-urlencode "limit=20" \
   --data-urlencode "offset=0" \
-  --data-urlencode "sort=-start_time" \
+  --data-urlencode "sort=-created_at" \
   "${API_BASE}/v1/profiles"
 ```
 
@@ -175,7 +307,7 @@ curl -sS -G \
 
 ```bash
 curl -sS \
-  -H "Authorization: Bearer ${USER_ID}" \
+  -H "Authorization: Bearer ${API_TOKEN}" \
   "${API_BASE}/v1/profiles/${JOB_ID}"
 ```
 
@@ -184,19 +316,18 @@ curl -sS \
 | 字段 | 说明 |
 | --- | --- |
 | `id` | Profiles API 任务 ID |
-| `agent_task_id` | HUATUO Agent 任务 ID |
-| `container_id` | 目标容器 ID；宿主机任务为空 |
+| `container_id` | 目标容器 ID；宿主机任务不返回该字段 |
 | `hostname` | 目标节点主机名 |
 | `type` | `cpu` 或 `memory` |
 | `language` | 目标进程语言 |
-| `memory_mode` | 内存剖析模式；CPU 任务为空 |
-| `binary_match_path` | 创建任务时指定的可执行文件匹配路径 |
+| `memory_mode` | 内存剖析模式；CPU 任务不返回该字段 |
+| `binary_match_path` | 可执行文件匹配路径；未使用时不返回该字段 |
 | `status` | 当前任务状态 |
-| `start_time`、`end_time` | 任务开始和结束时间；尚未产生时为空 |
-| `tracer_args` | huatuo-apiserver 实际下发给 profiler 的命令行参数 |
-| `duration` | 请求的剖析时长，单位为秒 |
-| `results.url` | 剖析结果的 Grafana 链接；结果尚未生成时为空 |
-| `error_message` | 任务失败或超时时的错误信息 |
+| `duration_seconds` | 请求的剖析时长，单位为秒 |
+| `created_at` | 任务创建时间 |
+| `finished_at` | 任务进入终态的时间；运行期间为 `null` |
+| `result_url` | 剖析结果的 Grafana 链接；结果尚未生成时为 `null` |
+| `status_reason` | 终态说明；无需说明时为 `null` |
 
 任务状态流转如下：
 
@@ -206,23 +337,23 @@ curl -sS \
 | `running` | Agent 正在采集剖析数据 |
 | `completed` | 任务正常完成 |
 | `stopped` | 任务被用户或任务管理器停止 |
-| `failed` | 任务执行失败，查看 `error_message` 定位原因 |
+| `failed` | 任务执行失败，查看 `status_reason` 定位原因 |
 | `timeout` | 任务超过允许的执行时间 |
 
 ### 6. 获取原始剖析数据
 
-`GET /v1/profiles/:id/raw` 根据 `agent_task_id` 查询存储中的原始剖析数据。数据量可能较大，可以直接保存到文件：
+`GET /v1/profiles/:id/raw` 返回该任务关联的原始剖析窗口。数据量可能较大，可以直接保存到文件：
 
 ```bash
 curl -sS \
-  -H "Authorization: Bearer ${USER_ID}" \
+  -H "Authorization: Bearer ${API_TOKEN}" \
   -o profile-raw.json \
   "${API_BASE}/v1/profiles/${JOB_ID}/raw?limit=100&offset=0"
 ```
 
-原始剖析记录位于响应体的 `data.data` 字段；`data.limit`、`data.offset`
-和 `data.has_more` 描述分页。任务尚未分配 Agent 任务 ID 时，接口返回
-`400 Bad Request`。
+剖析窗口位于响应体的 `data.items` 字段；`data.limit`、`data.offset`
+和 `data.has_more` 描述分页。每条记录包含 `uploaded_at`、`captured_at`、
+`profile_type` 和兼容 pprof 的 `profile` 数据。
 
 ### 7. 停止任务
 
@@ -231,7 +362,7 @@ curl -sS \
 ```bash
 curl -sS \
   -X PATCH \
-  -H "Authorization: Bearer ${USER_ID}" \
+  -H "Authorization: Bearer ${API_TOKEN}" \
   -H "Content-Type: application/json" \
   -d '{"status":"stopped"}' \
   "${API_BASE}/v1/profiles/${JOB_ID}"
@@ -246,7 +377,7 @@ curl -sS \
 ```bash
 curl -sS -i \
   -X DELETE \
-  -H "Authorization: Bearer ${USER_ID}" \
+  -H "Authorization: Bearer ${API_TOKEN}" \
   "${API_BASE}/v1/profiles/${JOB_ID}"
 ```
 
@@ -278,7 +409,7 @@ C、C++ 和 Go 使用基于 eBPF 的原生采集器，可观测 CPU、虚拟内�
 
 通过容器 ID 自动解析容器内目标进程，适合 Docker 和 containerd 工作负载。Java 和 Python 还支持逗号分隔的多个 PID，并可限制同时运行的采集子进程数量，适用于同一服务的多实例或父子进程分析。
 
-## 🚀 功能使用
+## 🛠️ 功能使用
 
 ### 1. 构建与运行条件
 
@@ -329,7 +460,7 @@ sudo _output/bin/profiler \
 | `--tool-path` | 无 | Java、Python | 第三方采集工具根目录，必填 |
 | `--binary-match-path` | 无 | Java、Python | 按可执行文件路径匹配容器内目标进程 |
 | `--huatuo-api-address` | `127.0.0.1:19704` | 容器目标 | 用于解析容器元数据的 HUATUO API 地址 |
-| `--tracer-id` | 自动生成 | 全部 | 采集任务 ID，主要用于远端存储关联 |
+| `--tracer-id` | 空；本地输出时内部生成 | 全部；`remote` 必填 | toolstream 和远端存储共用的稳定采集任务 ID |
 | `--enable-pprof` | `false` | 工具自身 | 在 `:6000` 暴露 profiler 进程自身的 Go pprof 接口 |
 | `--version-format` | `text` | 版本查询 | `--version` 的输出格式：`text`、`json` 或 `short` |
 | `--help`, `-h` | - | 全部 | 显示命令帮助 |
@@ -488,7 +619,7 @@ main;handleRequest;parsePayload 428
 main;handleRequest;writeResponse 172
 ```
 
-需要保留原始数据并支持后续使用不同配色或过滤规则重新渲染时，选择 `collapsed`。只需直接定位热点时，选择 `flamegraph`。`remote` 依赖 HUATUO toolstream Unix socket，独立离线使用时不应选择该格式。
+需要保留原始数据并支持后续使用不同配色或过滤规则重新渲染时，选择 `collapsed`。只需直接定位热点时，选择 `flamegraph`。`remote` 依赖 HUATUO toolstream Unix socket，要求提供非空的 `--tracer-id`，独立离线使用时不应选择该格式。
 
 ### 7. 根据集成测试复现
 

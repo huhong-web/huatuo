@@ -15,8 +15,8 @@
 // Package types defines the public data types and sentinel errors shared
 // across HuaTuo components and exposed to external consumers.
 //
-// It includes the CloudEvents-based WatchEvent envelope, tracer report
-// payloads (such as IOTracingReport and DropWatch events) and common
+// It includes the CloudEvents-based WatchEvent envelope, tracing snapshot
+// payloads (such as IOTracingSnapshot and DropWatchTracing) and common
 // error values used to signal cancellation, disconnection, and
 // unsupported operations.
 package types

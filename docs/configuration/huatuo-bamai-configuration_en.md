@@ -3,7 +3,7 @@ title: huatuo-bamai Configuration
 type: docs
 description:
 author: HUATUO Team
-date: 2026-03-29
+date: 2026-07-27
 weight: 4
 ---
 
@@ -18,28 +18,32 @@ The configuration file uses **TOML** format and includes multiple sections such 
 ### 2. Global Blacklist
 
 ```bash
-# Global blacklist for tracing and metrics
-BlackList = ["netdev_hw", "metax_gpu", "ascend_npu", "tcp_retransmit"]
+# Global tracing and metrics configuration.
+#
+# - BlackList
+# Global blacklist for tracing and metrics.
+#
+BlackList = ["netdev_hw", "metax_gpu", "ascend_npu", "diskio", "tcp_retransmit"]
 ```
 
 - **BlackList**: Global blacklist for tracing and metrics.
 
-  Modules or hardware to exclude from tracing and metric collection. The default list includes `tcp_retransmit`, so TCP retransmission tracing and its drop-correlation cache are disabled. Remove `tcp_retransmit` from the list and restart `huatuo-bamai` to enable them. Supports arrays, extend as needed.
+  Modules or hardware to exclude from tracing and metric collection. The default is `["netdev_hw", "metax_gpu", "ascend_npu", "diskio", "tcp_retransmit"]`, which disables tracing and metrics for the network device hardware layer, Metax GPU, Ascend NPU, procfs-based disk I/O statistics, and TCP retransmission tracing. Remove `diskio` to enable disk I/O metrics or `tcp_retransmit` to enable TCP retransmission tracing and its drop-correlation cache. Supports arrays; extend as needed.
 
 ### 3. Logging
 
 ```bash
 # Log Configuration
-#
-# - Level
-# Log level: Debug, Info, Warn, Error, Panic.
-# Default: Info
-#
-# - File
-# Log file path. If empty, logs go to stdout.
-# Default: empty
-#
 [Log]
+    # - Level
+    # The log level for huatuo-bamai: Debug, Info, Warn, Error, Panic.
+    # Default: Info
+    #
+    # - File
+    # Store logs to where the logging file is. If it is empty, don't write log
+    # to any file.
+    # Default: empty
+    #
     # Level = "Info"
     # File = ""
 ```
@@ -57,53 +61,83 @@ BlackList = ["netdev_hw", "metax_gpu", "ascend_npu", "tcp_retransmit"]
 ### 4. Runtime Resource Limits
 
 ```bash
-# Runtime resource limit
-#
-# - LimitInitCPU
-# During the huatuo-bamai startup, the CPU of process are restricted from use.
-# Default is 0.5 CPU.
-#
-# - LimitCPU
-# CPU limit at runtime.
-# Default is 2.0 CPU.
-#
-# - LimitMem
-# Memory limit in MB.
-# Default is 2048MB.
-#
-[RuntimeCgroup]
-    # LimitInitCPU = 0.5
-    # LimitCPU = 2.0
-    # LimitMem = 2048
+# Runtime limits for the huatuo-bamai process.
+[Runtime]
+    # - StartupCPULimitCores
+    # CPU limit during startup, in cores.
+    # Default: 0.5
+    #
+    # - CPULimitCores
+    # CPU limit after startup, in cores.
+    # Default: 2.0
+    #
+    # - MemoryLimitMiB
+    # Memory limit in MiB.
+    # Default: 2048
+    #
+    # StartupCPULimitCores = 0.5
+    # CPULimitCores = 2.0
+    # MemoryLimitMiB = 2048
 ```
 
-- **LimitInitCPU**: CPU limit during startup phase.
+- **StartupCPULimitCores** limits CPU usage during initialization. Default:
+  `0.5` cores.
+- **CPULimitCores** limits CPU usage after startup. Default: `2.0` cores.
+- **MemoryLimitMiB** limits process memory. Default: `2048` MiB.
 
-  Restricts CPU cores usable by the huatuo-bamai process during initialization.
+The configured values remain in their documented units. Memory is converted
+to bytes only when the cgroup limit is applied.
 
-  Default: 0.5 CPU.
+### 5. HTTP Server and Tasks
 
-  **Description**: Prevents excessive CPU usage during startup from affecting host business workloads. Value is in CPU cores (supports decimals).
+```toml
+# HTTP server configuration.
+[HTTPServer]
+    # - ListenAddress
+    # Listen address in "host:port" form.
+    # Default: ":19704"
+    #
+    # - MaxEventStreamClients
+    # Maximum number of concurrent clients allowed to hold an open
+    # /v1/events/watch SSE connection. Once the limit is reached, new requests
+    # are rejected with HTTP 429 until an existing client disconnects.
+    # Default: 100
+    #
+    # - EventStreamKeepAliveIntervalSeconds
+    # Interval in seconds at which the server sends an SSE comment ping to each
+    # connected client. The ping keeps the connection alive through load
+    # balancers and proxies that would otherwise time out idle connections. If
+    # writing the ping fails three consecutive times, the server closes the
+    # connection.
+    # Default: 30
+    #
+    # ListenAddress = ":19704"
+    # MaxEventStreamClients = 100
+    # EventStreamKeepAliveIntervalSeconds = 30
 
-- **LimitCPU**: Runtime CPU limit.
+# Locally running tracing tasks.
+[Tasks]
+    # - MaxConcurrent
+    # Maximum number of concurrent tasks.
+    # Default: 10
+    #
+    # MaxConcurrent = 10
+```
 
-  Restricts CPU resources after the process has started.
+- **ListenAddress** uses `host:port` form. An empty host listens on all
+  interfaces.
+- **MaxConcurrent** limits locally running tracing tasks.
 
-  Default: 2.0 CPU.
+The event stream settings control `POST /v1/events/watch`. When
+`MaxEventStreamClients` is reached, new streams receive HTTP 429.
+`EventStreamKeepAliveIntervalSeconds` controls SSE heartbeat comments used to
+keep proxy and load-balancer connections alive. After three consecutive write
+failures, the server closes the stream. Set the interval below any upstream
+idle timeout; 15–60 seconds is typical.
 
-  **Description**: Adjust based on node scale and workload. In high-density container environments, lower this value appropriately to ensure business stability.
+### 6. Storage
 
-- **LimitMem**: Memory resource limit.
-
-  Maximum memory allowed for the huatuo-bamai process.
-
-  Default: 2048 MB.
-
-  **Description**: Enforced via cgroup to prevent OOM (Out Of Memory) issues. In production, increase as needed according to collection scale.
-
-### 5. Storage
-
-#### 5.1 Elasticsearch and OpenSearch Storage
+#### 6.1 Elasticsearch and OpenSearch Storage
 
 ```bash
 # Storage configuration
@@ -114,15 +148,10 @@ BlackList = ["netdev_hw", "metax_gpu", "ascend_npu", "tcp_retransmit"]
     # Store the tracing and events data of linux kernel to ES/OS.
     #
     # - Address
-    # Default address is :9200 of localhost. Port 9200 is used for all API calls
-    # over HTTP. This includes search and aggregations, monitoring and anything
-    # else that uses a HTTP or HTTPS request. All client libraries will use this port to
-    # talk to Elasticsearch or OpenSearch.
+    # Port 9200 is commonly used for Elasticsearch/OpenSearch HTTP APIs.
     # e.g.
     # http://127.0.0.1:9200
     # https://127.0.0.1:9200
-    #
-    # Default: :9200
     #
     # - Index
     # Elasticsearch or OpenSearch index, a logical namespace that holds a collection of
@@ -131,20 +160,24 @@ BlackList = ["netdev_hw", "metax_gpu", "ascend_npu", "tcp_retransmit"]
     #
     # - Username
     # - Password
-    # There is no default username and password.
+    # Address, Username, and Password must be either all empty (disabled) or
+    # all configured (enabled). Partial connection settings are invalid.
     #
-    [Storage.ES]
+    [Storage.Elasticsearch]
         # Address = "http://127.0.0.1:9200"
         # Index = "huatuo_bamai"
-        Username = "elastic"
-        Password = "huatuo-bamai"
+        # Username = "elastic"
+        # Password = "REPLACE_WITH_PASSWORD"
 ```
 
 - **Address**: ElasticSearch/OpenSearch service address.
 
-  Default: http://127.0.0.1:9200.
+  No default value.
 
-  **Description**: Used to store kernel tracing and event data. ES/OS storage is disabled if any of Address, Username, or Password is empty. Port 9200 is the standard HTTP/HTTPS API port for ElasticSearch/OpenSearch.
+  **Description**: Used to store kernel tracing and event data. ES/OS storage
+  is disabled when Address, Username, and Password are all empty. All three
+  values are required when storage is enabled; a partial configuration
+  prevents startup.
 
 - **Index**: Index name.
 
@@ -154,19 +187,19 @@ BlackList = ["netdev_hw", "metax_gpu", "ascend_npu", "tcp_retransmit"]
 
 - **Username**: Authentication username.
 
-  No default value (example uses elastic).
+  No default value.
 
   **Description**: Used for Basic Auth.
 
 - **Password**: Authentication password.
 
-  No default value (example uses huatuo-bamai).
+  No default value.
 
   **Description**: Used together with the username. In production, use a strong password and enable TLS encryption.
 
 **Overall**: ES/OS storage persists kernel tracing and event data for later search and analysis.
 
-#### 5.2 Local File Storage
+#### 6.2 Local File Storage
 
 ```bash
 # LocalFile Storage
@@ -177,19 +210,19 @@ BlackList = ["netdev_hw", "metax_gpu", "ascend_npu", "tcp_retransmit"]
 # The directory for storing data. If the Path is empty, LocalFile will be disabled.
 # Default: "huatuo-local"
 #
-# - RotationSize
+# - RotationSizeMiB
 # The maximum size in Megabytes of a record file before it gets rotated
 # per kernel tracer.
 # Default: 100MB
 #
-# - MaxRotation
+# - MaxRotatedFiles
 # The maximum number of old log files to retain for per tracer.
 # Default: 10
 #
 [Storage.LocalFile]
     # Path = "huatuo-local"
-    # RotationSize = 100
-    # MaxRotation = 10
+    # RotationSizeMiB = 100
+    # MaxRotatedFiles = 10
 ```
 
 - **Path**: Local data storage directory.
@@ -198,7 +231,7 @@ BlackList = ["netdev_hw", "metax_gpu", "ascend_npu", "tcp_retransmit"]
 
   **Description**: Stores data locally on the host for on-site troubleshooting. Use an absolute path.
 
-- **RotationSize**: Single file rotation size.
+- **RotationSizeMiB**: Single file rotation size.
 
   Maximum size of a record file before rotation (per tracer).
 
@@ -206,17 +239,17 @@ BlackList = ["netdev_hw", "metax_gpu", "ascend_npu", "tcp_retransmit"]
 
   **Description**: Prevents any single file from growing too large and consuming excessive disk space.
 
-- **MaxRotation**: Maximum number of rotated files to retain.
+- **MaxRotatedFiles**: Maximum number of rotated files to retain.
 
   Default: 10.
 
   **Description**: Oldest files are automatically deleted once the limit is reached, controlling disk usage.
 
-### 6. Automatic Tracing
+### 7. Automatic Tracing
 
 The automatic tracing module is one of HUATUO’s intelligent features. It triggers specific performance tracing based on thresholds, reducing manual intervention.
 
-#### 6.1 CPUIdle Automatic Tracing — Sudden High CPU Usage in Containers
+#### 7.1 CPUIdle Automatic Tracing — Sudden High CPU Usage in Containers
 
 ```bash
 # Autotracing configuration 
@@ -348,7 +381,7 @@ The automatic tracing module is one of HUATUO’s intelligent features. It trigg
 
   Default: no rules, all containers monitored.
 
-#### 6.2 CPUSys Automatic Tracing — Sudden High System CPU on Host
+#### 7.2 CPUSys Automatic Tracing — Sudden High System CPU on Host
 
 ```bash
 # cpusys
@@ -368,6 +401,10 @@ The automatic tracing module is one of HUATUO’s intelligent features. It trigg
 # The sample interval of the cpu usage for host machine.
 # Default: 10s
 #
+# - IntervalTracing
+# Minimum time between profiling runs.
+# Default: 1800s
+#
 # - RunTracingToolTimeout
 # Execution timeout of this tracing tool (seconds).
 # Default: 10s
@@ -380,6 +417,7 @@ The automatic tracing module is one of HUATUO’s intelligent features. It trigg
 	# SysThreshold = 45
 	# DeltaSysThreshold = 20
 	# Interval = 10
+	# IntervalTracing = 1800
 	# RunTracingToolTimeout = 10
 ```
 
@@ -395,13 +433,15 @@ The automatic tracing module is one of HUATUO’s intelligent features. It trigg
 
   Default: 10s.
 
+- **IntervalTracing**: Minimum time between profiling runs. Default: 1800s.
+
 - **RunTracingToolTimeout**: Tracing execution timeout (seconds).
 
   Default: 10s.
 
 **Trigger Logic**: Tracing is triggered when both SysThreshold and DeltaSysThreshold are satisfied.
 
-#### 6.3 Dload AutoTracing — D-State Task Profiling for Containers
+#### 7.3 Dload AutoTracing — D-State Task Profiling for Containers
 
 ```bash
 # dload
@@ -439,7 +479,7 @@ The automatic tracing module is one of HUATUO’s intelligent features. It trigg
 
   Default: 1800s (30 minutes).
 
-#### 6.4 IOTracing AutoTracing — Container IO Performance Profiling
+#### 7.4 IOTracing AutoTracing — Container IO Performance Profiling
 
 ```bash
 # iotracing
@@ -516,7 +556,7 @@ The automatic tracing module is one of HUATUO’s intelligent features. It trigg
 
 **Description**: Used for diagnosing IO hotspots in containers, especially under high disk load.
 
-#### 6.5 MemoryBurst AutoTracing
+#### 7.5 MemoryBurst AutoTracing
 
 This module detects sudden memory usage spikes on the host and automatically captures kernel context to help diagnose memory pressure events.
 
@@ -581,11 +621,16 @@ This module detects sudden memory usage spikes on the host and automatically cap
 
   Default: 10.
 
-#### 6.6 Known Issue Filtering (IssuesList)
+#### 7.6 Known Issue Filtering (IssuesList)
 
 ```bash
-# IssuesList for known issue filtering in autotracing
-IssuesList = []
+# Autotracing configuration.
+#
+# - IssuesList
+# Known issue filters for autotracing.
+#
+[AutoTracing]
+    IssuesList = []
 ```
 
 - **IssuesList**: Known issue filter. Format: `[["name", "regex"], ...]`. When a collected stack trace matches the regex, it is labeled with the issue name. Default `[]`.
@@ -594,11 +639,11 @@ IssuesList = []
 
 **Note**: Only supports `dload` tracing of known issues filtering, other events are not supported.
 
-### 7. Event Tracing
+### 8. Event Tracing
 
 This section is responsible for capturing key kernel events and monitoring latency, including softirq, memory reclaim, network receive latency, network device events, and packet drop monitoring. It is the core module for kernel-level anomaly context collection in HUATUO.
 
-#### 7.1 Softirq Disable Tracing
+#### 8.1 Softirq Disable Tracing
 
 ```bash
 # linux kernel events capturing configuration
@@ -622,7 +667,7 @@ This section is responsible for capturing key kernel events and monitoring laten
 
   **Description**: Long softirq disable periods can cause delays in networking, timers, etc. Useful for diagnosing interrupt storms or high-load scenarios.
 
-#### 7.2 Memory Reclaim Blocking Tracing
+#### 8.2 Memory Reclaim Blocking Tracing
 
 ```bash
 # memreclaim
@@ -644,7 +689,7 @@ This section is responsible for capturing key kernel events and monitoring laten
 
   **Description**: Memory reclaim blocking is a common cause of process stalls, especially in memory-constrained cloud-native environments.
 
-#### 7.3 Network Receive Latency Tracing
+#### 8.3 Network Receive Latency Tracing
 
 ```bash
 # networking rx latency
@@ -701,7 +746,7 @@ This section is responsible for capturing key kernel events and monitoring laten
 
   Default: true.
 
-#### 7.4 Network Device Event Monitoring
+#### 8.4 Network Device Event Monitoring
 
 ```bash
 # netdev events
@@ -722,7 +767,7 @@ This section is responsible for capturing key kernel events and monitoring laten
 
   **Description**: Monitors physical link status events for specified network interfaces.
 
-#### 7.5 Packet Drop Monitoring
+#### 8.5 Packet Drop Monitoring
 
 ```bash
 # dropwatch
@@ -743,7 +788,7 @@ This section is responsible for capturing key kernel events and monitoring laten
 
   **Description**: Neighbor table related drops are usually normal behavior; excluding them reduces false positives.
 
-#### 7.6 TCP Retransmission Tracing ([EventTracing.TCPRetransmit])
+#### 8.6 TCP Retransmission Tracing ([EventTracing.TCPRetransmit])
 
 ```bash
 [EventTracing.TCPRetransmit]
@@ -770,10 +815,9 @@ This section is responsible for capturing key kernel events and monitoring laten
 
 - **MaxEventsPerSecond**: Maximum TCP retransmission events emitted by BPF per second.
 
-  Default: 100. Set to 0 for unlimited output. When the limit is exceeded,
-  `tcpshark` logs `rate limit hit`.
+  Default: 100. Set to 0 for unlimited output. When the limit is exceeded, `tcpshark` logs `rate limit hit`.
 
-#### 7.7 Hardware Error Event Tracing (EventTracing.Ras)
+#### 8.7 Hardware Error Event Tracing (EventTracing.Ras)
 
 ```bash
 # ras
@@ -797,11 +841,16 @@ This section is responsible for capturing key kernel events and monitoring laten
 
   **Description**: THR events are generated by the CPU's local-APIC threshold interrupt when correctable hardware errors accumulate. These can fire at very high frequency during hardware degradation. The backoff suppresses redundant saves while ensuring at least one record is captured per interval. Lower values provide more granular event records at the cost of higher storage throughput; in environments with frequent correctable errors, consider raising this value to reduce noise.
 
-#### 7.8 Known Issue Filtering (IssuesList)
+#### 8.8 Known Issue Filtering (IssuesList)
 
 ```bash
-# IssuesList for known issue filtering in event tracing
-IssuesList = []
+# Linux kernel event tracing configuration.
+#
+# - IssuesList
+# Known issue filters for event tracing.
+#
+[EventTracing]
+    IssuesList = []
 ```
 
 - **IssuesList**: Known issue filter. Same format and usage as AutoTracing `IssuesList`. Matches event titles against regex patterns, labeling them with the issue name. Default `[]`.
@@ -810,7 +859,7 @@ IssuesList = []
 
 **Note**: Only supports `net_rx_latency` tracing of known issues filtering, other events are not supported.
 
-### 8. Metric Collector
+### 9. Metric Collector
 
 This section defines collection rules for various system and network metrics. All `Included`/`Excluded` fields share the same filter logic (regex):
 
@@ -819,7 +868,7 @@ This section defines collection rules for various system and network metrics. Al
 - Included only: whitelist, only matched items are collected
 - Both: must match Included AND not match Excluded
 
-#### 8.1 Netdev Statistics
+#### 9.1 Netdev Statistics
 
 ```bash
 # Metric Collector
@@ -855,7 +904,7 @@ This section defines collection rules for various system and network metrics. Al
 
 - **DeviceExcluded**: Regex to exclude devices. Example: "^(lo)|(docker\\w*)|(veth\\w*)$", meaning exclude loopback, docker, and veth interfaces.
 
-#### 8.2 Netdev DCB Collection
+#### 9.2 Netdev DCB Collection
 
 ```bash
 # netdev dcb, DCB (Data Center Bridging)
@@ -874,7 +923,7 @@ This section defines collection rules for various system and network metrics. Al
 
   Default: empty.
 
-#### 8.3 Netdev Hardware Statistics
+#### 9.3 Netdev Hardware Statistics
 
 ```bash
 # netdev hardware statistic
@@ -893,7 +942,7 @@ This section defines collection rules for various system and network metrics. Al
 
   Default: empty.
 
-#### 8.4 Qdisc Collection
+#### 9.4 Qdisc Collection
 
 ```bash
 # Qdisc
@@ -908,7 +957,7 @@ This section defines collection rules for various system and network metrics. Al
 
 - **DeviceIncluded / DeviceExcluded**: Same as above.
 
-#### 8.5 vmstat Metric Collection
+#### 9.5 vmstat Metric Collection
 
 ```bash
 # vmstat
@@ -928,7 +977,7 @@ This section defines collection rules for various system and network metrics. Al
 
 - **IncludedOnContainer / ExcludedOnContainer**: Filter fields for container cgroup memory.stat.
 
-#### 8.6 Other Metric Collections
+#### 9.6 Other Metric Collections
 
 ```bash
 # MemoryEvents/Netstat/MountPointStat
@@ -952,7 +1001,7 @@ This section defines collection rules for various system and network metrics. Al
 
 - **MountPointsIncluded**: Regex for mount points to collect. Default includes /, /home, /boot.
 
-### 9. Pod
+### 10. Pod
 
 This section configures how to fetch Pod information from kubelet to enable container/Pod-level labeling and metric isolation.
 
@@ -998,47 +1047,6 @@ This section configures how to fetch Pod information from kubelet to enable cont
 
   **Description**: Used for mTLS authentication on the HTTPS port. In non-Kubernetes (bare-metal) environments, set both ports to 0 to disable Pod fetching.
 
-### 10. Events Watch
-
-This section controls the runtime behavior of the `POST /v1/events/watch` SSE streaming API, through which external clients can subscribe to a real-time stream of kernel events.
-
-```bash
-# Events Watch Configuration
-#
-# Controls the behavior of the POST /v1/events/watch SSE streaming API,
-# which allows external clients to subscribe to kernel events in real-time.
-#
-# - MaxClients
-# Maximum number of concurrent clients allowed to hold an open /v1/events/watch
-# connection. Once the limit is reached, new requests are rejected with HTTP 429
-# (Too Many Requests) until an existing client disconnects.
-# Default: 100
-#
-# - KeepAliveInterval
-# Interval in seconds at which the server sends an SSE comment ping to each
-# connected client. The ping keeps the HTTP connection alive through load
-# balancers and proxies that would otherwise time out idle connections.
-# If writing the ping fails three consecutive times the server treats the
-# client as gone and closes the connection.
-# Default: 30s
-#
-[EventsWatch]
-    # MaxClients = 100
-    # KeepAliveInterval = 30
-```
-
-- **MaxClients**: Maximum number of concurrent `/v1/events/watch` connections.
-
-  Default: 100. When this limit is reached, new requests are rejected with HTTP 429 (Too Many Requests) until an existing client disconnects.
-
-  **Description**: Tune this value based on available node resources and the expected number of subscribers. Each open connection occupies a goroutine and a buffered subscription channel (256 events deep); keep memory pressure in mind when setting a high value.
-
-- **KeepAliveInterval**: Interval in seconds between SSE heartbeat pings sent to each connected client.
-
-  Default: 30s. The server sends an SSE comment line (`": ping"`) at this interval to keep the HTTP long-polling connection alive through load balancers and proxies that would otherwise close idle connections.
-
-  **Description**: If three consecutive write attempts (ping or event data) fail, the server considers the client gone and closes the connection, releasing all associated resources. Set this value below the idle-timeout of any upstream proxy. Common production values are 15–60s.
-
 ### 11. CLI Flags
 
 `huatuo-bamai` supports the following command-line flags:
@@ -1081,7 +1089,8 @@ Specific rules:
 
 ### 13. Best Practices and Important Notes
 
-- **Resource Control**: In production, prioritize adjusting CPU and memory limits in [RuntimeCgroup] to avoid impacting business containers.
+- **Resource Control**: In production, tune CPU and memory limits under
+  `[Runtime]` to avoid impacting business containers.
 - **Storage Choice**: For small-scale deployments, prefer [Storage.LocalFile] for local troubleshooting. For large clusters, configure Elasticsearch for centralized storage and querying.
 - **AutoTracing Tuning**: Adjust thresholds based on workload characteristics. Thresholds that are too low cause frequent triggering; thresholds that are too high may miss issues. Validate gradually in a test environment.
 - **Security**: Use strong passwords for ES configuration and consider enabling HTTPS. Avoid hard-coding sensitive information in the configuration file.

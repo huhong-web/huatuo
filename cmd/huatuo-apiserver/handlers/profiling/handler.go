@@ -35,10 +35,9 @@ type Handler struct {
 
 // Config contains profiling values used by request and response handling.
 type Config struct {
-	AggregationInterval int
-	ExecutionTimeout    int
-	MaxProfilerProcs    int
-	FlameGraphBaseURL   string
+	AggregationIntervalSeconds     int
+	MaxConcurrentProfilerProcesses int
+	DashboardBaseURL               string
 }
 
 // ProfileQueryService defines profile query operations consumed by the handler.
@@ -76,13 +75,34 @@ func NewHandler(
 		{Typ: server.HttpPost, Uri: "", Handle: h.create},
 		{Typ: server.HttpGet, Uri: "", Handle: h.list},
 		{Typ: server.HttpGet, Uri: "/:id", Handle: h.get},
-		{Typ: server.HttpGet, Uri: "/:id/raw", Handle: h.getRawData},
 		{Typ: server.HttpPatch, Uri: "/:id", Handle: h.patchOne},
 		{Typ: server.HttpDelete, Uri: "/:id", Handle: h.delete},
-		{Typ: server.HttpPost, Uri: "/flamegraph/querier.v1.QuerierService/SelectMergeStacktraces", Handle: h.displaySelectMergeStacktraces},
-		{Typ: server.HttpPost, Uri: "/flamegraph/querier.v1.QuerierService/ProfileTypes", Handle: h.displayProfileTypes},
-		{Typ: server.HttpPost, Uri: "/flamegraph/querier.v1.QuerierService/LabelNames", Handle: h.displayLabelNames},
-		{Typ: server.HttpPost, Uri: "/flamegraph/querier.v1.QuerierService/LabelValues", Handle: h.displayLabelValues},
+	}
+	if profileSvc != nil {
+		h.Handlers = append(
+			h.Handlers,
+			server.Handle{Typ: server.HttpGet, Uri: "/:id/raw", Handle: h.getRawData},
+			server.Handle{
+				Typ:    server.HttpPost,
+				Uri:    "/flamegraph/querier.v1.QuerierService/SelectMergeStacktraces",
+				Handle: h.displaySelectMergeStacktraces,
+			},
+			server.Handle{
+				Typ:    server.HttpPost,
+				Uri:    "/flamegraph/querier.v1.QuerierService/ProfileTypes",
+				Handle: h.displayProfileTypes,
+			},
+			server.Handle{
+				Typ:    server.HttpPost,
+				Uri:    "/flamegraph/querier.v1.QuerierService/LabelNames",
+				Handle: h.displayLabelNames,
+			},
+			server.Handle{
+				Typ:    server.HttpPost,
+				Uri:    "/flamegraph/querier.v1.QuerierService/LabelValues",
+				Handle: h.displayLabelValues,
+			},
+		)
 	}
 
 	return h

@@ -17,26 +17,12 @@ package bpf
 import (
 	"context"
 	"fmt"
-	"unsafe"
 
+	"huatuo-bamai/internal/bpf/abi"
 	"huatuo-bamai/internal/log"
 )
 
 const rateLimitEventBufferSize = 64
-
-type rateLimitEvent struct {
-	Interval      uint64
-	Begin         uint64
-	Burst         uint64
-	MaxBurst      uint64
-	Events        uint64
-	NMissed       uint64
-	TotalEvents   uint64
-	TotalNMissed  uint64
-	TotalInterval uint64
-}
-
-var _ = [1]struct{}{}[72-unsafe.Sizeof(rateLimitEvent{})]
 
 // RateLimiter connects userspace configuration and alerts to a named BPF rate limiter.
 type RateLimiter struct {
@@ -84,7 +70,7 @@ func (r *RateLimiter) OpenEventPipe(ctx context.Context, b BPF) (PerfEventReader
 
 // ReadEvents reads and logs rate-limit alerts until ctx is canceled.
 func (r *RateLimiter) ReadEvents(ctx context.Context, reader PerfEventReader, eventsPerSecond uint64) {
-	var event rateLimitEvent
+	var event abi.RatelimitEvent
 
 	for {
 		if ctx.Err() != nil {
@@ -105,9 +91,9 @@ func (r *RateLimiter) ReadEvents(ctx context.Context, reader PerfEventReader, ev
 			r.logPrefix,
 			eventsPerSecond,
 			event.Events,
-			event.NMissed,
+			event.Nmissed,
 			event.TotalEvents,
-			event.TotalNMissed,
+			event.TotalNmissed,
 		)
 	}
 }

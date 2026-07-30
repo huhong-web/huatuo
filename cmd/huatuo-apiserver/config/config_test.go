@@ -21,289 +21,425 @@ import (
 	"testing"
 )
 
-func TestLoadValidatesProfilingConfig(t *testing.T) {
-	configFile := filepath.Join(t.TempDir(), "apiserver.conf")
-	contents := []byte(`
-[[Auth.users]]
-ID = "test-token"
-IsAdmin = true
-
-[ElasticSearch]
-Address = "http://127.0.0.1:9200"
-
-[Profiling]
-AggregationInterval = 10
-ExecutionTimeout = 19
-MaxProfilerProcs = 10
-FlameGraphBaseURL = "http://localhost:8006/d"
+func TestLoadFileDefaults(t *testing.T) {
+	cfg := loadTestConfig(t, `
+[[Auth.Users]]
+ID = "admin"
+BearerToken = "secret"
+Admin = true
 `)
-	if err := os.WriteFile(configFile, contents, 0o600); err != nil {
-		t.Fatalf("os.WriteFile() error = %v", err)
-	}
 
-	_, err := LoadFile(configFile)
-	if err == nil || !strings.Contains(err.Error(), "validating profiling config: execution timeout must be at least 20 seconds") {
-		t.Fatalf("Load() error = %v, want profiling validation error", err)
+	if cfg.Log.Level != "Info" {
+		t.Errorf("Log.Level = %q, want %q", cfg.Log.Level, "Info")
+	}
+	if cfg.Runtime.CPULimitCores != 20 ||
+		cfg.Runtime.MemoryLimitMiB != 4096 {
+		t.Errorf("Runtime = %+v, want default limits", cfg.Runtime)
+	}
+	if cfg.APIServer.ListenAddress != ":12740" {
+		t.Errorf("ListenAddress = %q, want %q", cfg.APIServer.ListenAddress, ":12740")
+	}
+	if cfg.APIServer.RateLimit.RequestsPerSecond != 200 ||
+		cfg.APIServer.RateLimit.Burst != 200 {
+		t.Errorf("RateLimit = %+v, want default values", cfg.APIServer.RateLimit)
+	}
+	if cfg.Jobs.Profiling != (JobQuotaConfig{3, 500}) {
+		t.Errorf("Profiling quota = %+v, want default values", cfg.Jobs.Profiling)
+	}
+	if cfg.Jobs.Tracing != (JobQuotaConfig{5, 1000}) {
+		t.Errorf("Tracing quota = %+v, want default values", cfg.Jobs.Tracing)
+	}
+	if cfg.Agent.HTTPPort != 19704 ||
+		cfg.Agent.StatusPollingIntervalSeconds != 5 ||
+		cfg.Agent.MaxConsecutiveStatusPollingErrors != 3 {
+		t.Errorf("Agent = %+v, want default values", cfg.Agent)
+	}
+	if cfg.Elasticsearch.Enabled() {
+		t.Error("Elasticsearch.Enabled() = true, want opt-in storage")
+	}
+	if cfg.Elasticsearch.Index != "huatuo_bamai" {
+		t.Errorf("Elasticsearch.Index = %q, want default", cfg.Elasticsearch.Index)
+	}
+	if cfg.Profiling.AggregationIntervalSeconds != 10 ||
+		cfg.Profiling.MaxConcurrentProfilerProcesses != 10 ||
+		cfg.Profiling.DashboardBaseURL != "" {
+		t.Errorf("Profiling = %+v, want default values", cfg.Profiling)
 	}
 }
 
-func TestLoadFileDoesNotAccumulateMemoryConversion(t *testing.T) {
-	configFile := filepath.Join(t.TempDir(), "apiserver.conf")
-	contents := []byte(`
-[[Auth.users]]
-ID = "test-token"
-IsAdmin = true
+func TestLoadFileCanonicalOverrides(t *testing.T) {
+	cfg := loadTestConfig(t, `
+[Log]
+Level = "Warn"
 
-[ElasticSearch]
-Address = "http://127.0.0.1:9200"
+[Runtime]
+CPULimitCores = 8
+MemoryLimitMiB = 2048
 
-[RuntimeCgroup]
-LimitMem = 64
+[APIServer]
+ListenAddress = "127.0.0.1:18080"
 
-[Profiling]
-AggregationInterval = 10
-ExecutionTimeout = 20
-MaxProfilerProcs = 10
-FlameGraphBaseURL = "http://localhost:8006/d"
-`)
-	if err := os.WriteFile(configFile, contents, 0o600); err != nil {
-		t.Fatalf("os.WriteFile() error = %v", err)
-	}
+[APIServer.RateLimit]
+RequestsPerSecond = 20
+Burst = 30
 
-	first, err := LoadFile(configFile)
-	if err != nil {
-		t.Fatalf("first LoadFile() error = %v", err)
-	}
-	second, err := LoadFile(configFile)
-	if err != nil {
-		t.Fatalf("second LoadFile() error = %v", err)
-	}
-	want := int64(64 * 1024 * 1024)
-	if first.RuntimeCgroup.LimitMem != want || second.RuntimeCgroup.LimitMem != want {
-		t.Fatalf(
-			"LimitMem = (%d, %d), want (%d, %d)",
-			first.RuntimeCgroup.LimitMem,
-			second.RuntimeCgroup.LimitMem,
-			want,
-			want,
-		)
-	}
-}
+[Jobs]
+StoreDSN = "state/jobs.db"
 
-func TestLoadFileRequiresAuthUser(t *testing.T) {
-	configFile := filepath.Join(t.TempDir(), "apiserver.conf")
-	if err := os.WriteFile(configFile, nil, 0o600); err != nil {
-		t.Fatalf("os.WriteFile() error = %v", err)
-	}
+[Jobs.Profiling]
+MaxConcurrentPerHost = 2
+MaxConcurrent = 100
 
-	_, err := LoadFile(configFile)
-	if err == nil || !strings.Contains(err.Error(), "at least one auth user is required") {
-		t.Fatalf("LoadFile() error = %v, want missing auth user", err)
-	}
-}
+[Jobs.Tracing]
+MaxConcurrentPerHost = 4
+MaxConcurrent = 200
 
-func TestLoadFileDefaultsElasticsearchConfig(t *testing.T) {
-	configFile := filepath.Join(t.TempDir(), "apiserver.conf")
-	contents := []byte(`
-[[Auth.users]]
-ID = "test-token"
-IsAdmin = true
-`)
-	if err := os.WriteFile(configFile, contents, 0o600); err != nil {
-		t.Fatalf("os.WriteFile() error = %v", err)
-	}
+[Agent]
+HTTPPort = 29704
+RequestTimeoutSeconds = 20
+StatusPollingIntervalSeconds = 7
+MaxConsecutiveStatusPollingErrors = 4
 
-	cfg, err := LoadFile(configFile)
-	if err != nil {
-		t.Fatalf("LoadFile() error = %v", err)
-	}
-	if cfg.ElasticSearch.Address != "http://127.0.0.1:9200" {
-		t.Fatalf("ElasticSearch.Address = %q, want default", cfg.ElasticSearch.Address)
-	}
-	if cfg.ElasticSearch.Index != "huatuo_bamai" {
-		t.Fatalf("ElasticSearch.Index = %q, want default", cfg.ElasticSearch.Index)
-	}
-	if cfg.ElasticSearch.Username != "" || cfg.ElasticSearch.Password != "" {
-		t.Fatalf("ElasticSearch credentials = (%q, %q), want empty", cfg.ElasticSearch.Username, cfg.ElasticSearch.Password)
-	}
-}
-
-func TestLoadFileOverridesElasticsearchDefaults(t *testing.T) {
-	configFile := filepath.Join(t.TempDir(), "apiserver.conf")
-	contents := []byte(`
-[[Auth.users]]
-ID = "test-token"
-IsAdmin = true
-
-[ElasticSearch]
+[Elasticsearch]
 Address = "https://search.example:9443"
+Username = "huatuo"
+Password = "secret"
 Index = "profiles"
+
+[Profiling]
+AggregationIntervalSeconds = 15
+MaxConcurrentProfilerProcesses = 6
+DashboardBaseURL = "https://grafana.example/d"
+
+[[Auth.Users]]
+ID = "operator"
+BearerToken = "operator-secret"
+Permissions = ["GET /v1/profiling/**"]
 `)
-	if err := os.WriteFile(configFile, contents, 0o600); err != nil {
-		t.Fatalf("os.WriteFile() error = %v", err)
-	}
 
-	cfg, err := LoadFile(configFile)
-	if err != nil {
-		t.Fatalf("LoadFile() error = %v", err)
+	if cfg.Runtime.MemoryLimitMiB != 2048 {
+		t.Errorf("MemoryLimitMiB = %d, want 2048", cfg.Runtime.MemoryLimitMiB)
 	}
-	if cfg.ElasticSearch.Address != "https://search.example:9443" {
-		t.Fatalf("ElasticSearch.Address = %q, want explicit value", cfg.ElasticSearch.Address)
+	if cfg.Log.Level != "Warn" {
+		t.Errorf("Log.Level = %q, want %q", cfg.Log.Level, "Warn")
 	}
-	if cfg.ElasticSearch.Index != "profiles" {
-		t.Fatalf("ElasticSearch.Index = %q, want explicit value", cfg.ElasticSearch.Index)
+	if cfg.APIServer.RateLimit != (RateLimitConfig{20, 30}) {
+		t.Errorf("RateLimit = %+v, want overrides", cfg.APIServer.RateLimit)
+	}
+	if cfg.Jobs.Profiling != (JobQuotaConfig{2, 100}) ||
+		cfg.Jobs.Tracing != (JobQuotaConfig{4, 200}) {
+		t.Errorf("Jobs = %+v, want quota overrides", cfg.Jobs)
+	}
+	if cfg.Agent.StatusPollingIntervalSeconds != 7 ||
+		cfg.Agent.MaxConsecutiveStatusPollingErrors != 4 {
+		t.Errorf("Agent = %+v, want status polling overrides", cfg.Agent)
+	}
+	if !cfg.Elasticsearch.Enabled() || cfg.Elasticsearch.Index != "profiles" {
+		t.Errorf("Elasticsearch = %+v, want enabled overrides", cfg.Elasticsearch)
+	}
+	if cfg.Profiling.DashboardBaseURL != "https://grafana.example/d" {
+		t.Errorf("DashboardBaseURL = %q, want override", cfg.Profiling.DashboardBaseURL)
+	}
+	if cfg.Auth.Users[0].ID != "operator" {
+		t.Errorf("user ID = %q, want operator", cfg.Auth.Users[0].ID)
 	}
 }
 
-func TestAgentConfigValidate(t *testing.T) {
-	valid := AgentConfig{
-		Port:                      19704,
-		RequestTimeoutSeconds:     10,
-		StatusRetryAttempts:       3,
-		StatusRetryBackoffMillis:  100,
-		StatusPollIntervalSeconds: 5,
-		MaxConsecutivePollErrors:  3,
-	}
-	if err := valid.Validate(); err != nil {
-		t.Fatalf("Validate() error = %v", err)
-	}
-
-	valid.Port = 65536
-	if err := valid.Validate(); err == nil || !strings.Contains(err.Error(), "must not exceed 65535") {
-		t.Fatalf("Validate() error = %v, want invalid port", err)
-	}
-}
-
-func TestProfilingConfigValidate(t *testing.T) {
+func TestLoadFileRejectsLegacyKeys(t *testing.T) {
 	tests := []struct {
-		name      string
-		config    ProfilingConfig
-		wantError string
+		name     string
+		contents string
 	}{
 		{
-			name: "valid",
-			config: ProfilingConfig{
-				AggregationInterval: 10,
-				ExecutionTimeout:    20,
-				MaxProfilerProcs:    10,
-				FlameGraphBaseURL:   "http://localhost:8006/d",
-			},
+			name: "root log level",
+			contents: `
+LogLevel = "Info"
+
+[[Auth.Users]]
+ID = "admin"
+BearerToken = "secret"
+Admin = true
+`,
 		},
 		{
-			name: "non-positive aggregation interval",
-			config: ProfilingConfig{
-				ExecutionTimeout:  20,
-				FlameGraphBaseURL: "http://localhost:8006/d",
-			},
-			wantError: "aggregation interval must be greater than 0 seconds",
+			name: "task config",
+			contents: `
+[[Auth.Users]]
+ID = "admin"
+BearerToken = "secret"
+Admin = true
+
+[TaskConfig]
+JobStoreDSN = "jobs.db"
+`,
 		},
 		{
-			name: "aggregation interval leaves no valid duration",
-			config: ProfilingConfig{
-				AggregationInterval: 1200,
-				ExecutionTimeout:    2400,
-				FlameGraphBaseURL:   "http://localhost:8006/d",
-			},
-			wantError: "aggregation interval must be less than 1200 seconds",
+			name: "admin field",
+			contents: `
+[[Auth.Users]]
+ID = "admin"
+BearerToken = "secret"
+IsAdmin = true
+`,
 		},
 		{
-			name: "execution timeout too short",
-			config: ProfilingConfig{
-				AggregationInterval: 10,
-				ExecutionTimeout:    19,
-				FlameGraphBaseURL:   "http://localhost:8006/d",
-			},
-			wantError: "execution timeout must be at least 20 seconds",
+			name: "http safeguard",
+			contents: `
+[[Auth.Users]]
+ID = "admin"
+BearerToken = "secret"
+Admin = true
+
+[APIServer]
+ReadTimeoutSeconds = 60
+`,
 		},
 		{
-			name: "negative profiler process limit",
-			config: ProfilingConfig{
-				AggregationInterval: 10,
-				ExecutionTimeout:    20,
-				MaxProfilerProcs:    -1,
-				FlameGraphBaseURL:   "http://localhost:8006/d",
-			},
-			wantError: "max profiler procs must not be negative",
+			name: "runtime cgroup section",
+			contents: `
+[[Auth.Users]]
+ID = "admin"
+BearerToken = "secret"
+Admin = true
+
+[RuntimeCgroup]
+CPULimitCores = 20
+`,
 		},
 		{
-			name: "unsupported flame graph URL scheme",
-			config: ProfilingConfig{
-				AggregationInterval: 10,
-				ExecutionTimeout:    20,
-				FlameGraphBaseURL:   "ftp://grafana.example/d",
-			},
-			wantError: "flame graph base url must use http or https",
+			name: "stop concurrency",
+			contents: `
+[[Auth.Users]]
+ID = "admin"
+BearerToken = "secret"
+Admin = true
+
+[Jobs]
+MaxConcurrentStops = 16
+`,
 		},
 		{
-			name: "flame graph URL without host",
-			config: ProfilingConfig{
-				AggregationInterval: 10,
-				ExecutionTimeout:    20,
-				FlameGraphBaseURL:   "http:///d",
-			},
-			wantError: "flame graph base url must include a host",
+			name: "status polling section",
+			contents: `
+[[Auth.Users]]
+ID = "admin"
+BearerToken = "secret"
+Admin = true
+
+[Agent.StatusPolling]
+IntervalSeconds = 5
+MaxConsecutiveErrors = 3
+`,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := tt.config.Validate()
-			if tt.wantError == "" {
-				if err != nil {
-					t.Fatalf("Validate() error = %v", err)
-				}
-				return
-			}
-			if err == nil || !strings.Contains(err.Error(), tt.wantError) {
-				t.Fatalf("Validate() error = %v, want contain %q", err, tt.wantError)
+			if _, err := LoadFile(writeTestConfig(t, tt.contents)); err == nil {
+				t.Fatal("LoadFile() error = nil, want strict legacy-key rejection")
 			}
 		})
 	}
 }
 
-func TestConfigValidateRejectsDuplicateUsers(t *testing.T) {
-	cfg := Config{
-		RuntimeCgroup: RuntimeCgroupConfig{LimitCPU: 1, LimitMem: 1},
-		APIServer: APIServerConfig{
-			TCPAddr:                  ":12740",
-			ReadHeaderTimeoutSeconds: 10,
-			ReadTimeoutSeconds:       30,
-			WriteTimeoutSeconds:      60,
-			IdleTimeoutSeconds:       120,
-			ShutdownTimeoutSeconds:   60,
-			MaxHeaderBytes:           1024,
-			MaxBodyBytes:             1024,
-			RateLimit:                10,
-			RateBurst:                10,
+func TestAuthConfigValidate(t *testing.T) {
+	tests := []struct {
+		name    string
+		users   []UserConfig
+		wantErr string
+	}{
+		{name: "missing users", wantErr: "at least one user"},
+		{
+			name: "missing ID",
+			users: []UserConfig{{
+				BearerToken: "secret",
+				Admin:       true,
+			}},
+			wantErr: "id is required",
 		},
-		TaskConfig: TaskConfig{
-			MaxProfilingTasksPerHost: 1,
-			MaxTracingTasksPerHost:   1,
-			MaxTotalProfilingTasks:   1,
-			MaxTotalTracingTasks:     1,
-			JobStoreDSN:              "jobs.db",
-			ShutdownConcurrency:      1,
+		{
+			name: "missing token",
+			users: []UserConfig{{
+				ID:    "admin",
+				Admin: true,
+			}},
+			wantErr: "bearer token is required",
 		},
-		Agent: AgentConfig{
-			Port:                      19704,
-			RequestTimeoutSeconds:     10,
-			StatusRetryAttempts:       3,
-			StatusRetryBackoffMillis:  100,
-			StatusPollIntervalSeconds: 5,
-			MaxConsecutivePollErrors:  3,
+		{
+			name: "duplicate ID",
+			users: []UserConfig{
+				{ID: "same", BearerToken: "one", Admin: true},
+				{ID: "same", BearerToken: "two", Admin: true},
+			},
+			wantErr: "duplicate id",
 		},
-		Profiling: ProfilingConfig{
-			AggregationInterval: 10,
-			ExecutionTimeout:    20,
-			FlameGraphBaseURL:   "http://localhost:8006/d",
+		{
+			name: "duplicate token",
+			users: []UserConfig{
+				{ID: "one", BearerToken: "same", Admin: true},
+				{ID: "two", BearerToken: "same", Admin: true},
+			},
+			wantErr: "duplicate bearer token",
 		},
-		ElasticSearch: ElasticSearchConfig{Address: "http://127.0.0.1:9200"},
-		Auth: AuthConfig{Users: []UserConfig{
-			{ID: "duplicate", IsAdmin: true},
-			{ID: "duplicate", IsAdmin: true},
-		}},
+		{
+			name: "non-admin missing permissions",
+			users: []UserConfig{{
+				ID:          "viewer",
+				BearerToken: "secret",
+			}},
+			wantErr: "permissions are required",
+		},
+		{
+			name: "invalid permission method",
+			users: []UserConfig{{
+				ID:          "viewer",
+				BearerToken: "secret",
+				Permissions: []string{"FETCH /v1/jobs"},
+			}},
+			wantErr: "invalid permission method",
+		},
+		{
+			name: "valid",
+			users: []UserConfig{{
+				ID:          "viewer",
+				BearerToken: "secret",
+				Permissions: []string{"GET /v1/jobs"},
+			}},
+		},
 	}
-	if err := cfg.Validate(); err == nil || !strings.Contains(err.Error(), "duplicate ID") {
-		t.Fatalf("Validate() error=%v, want duplicate ID", err)
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := (AuthConfig{Users: tt.users}).Validate()
+			assertErrorContains(t, err, tt.wantErr)
+		})
+	}
+}
+
+func TestConfigValidation(t *testing.T) {
+	tests := []struct {
+		name    string
+		mutate  func(*Config)
+		wantErr string
+	}{
+		{
+			name: "invalid log level",
+			mutate: func(cfg *Config) {
+				cfg.Log.Level = "verbose"
+			},
+			wantErr: "unsupported log level",
+		},
+		{
+			name: "invalid CPU limit",
+			mutate: func(cfg *Config) {
+				cfg.Runtime.CPULimitCores = 0
+			},
+			wantErr: "cpu limit",
+		},
+		{
+			name: "invalid listen address",
+			mutate: func(cfg *Config) {
+				cfg.APIServer.ListenAddress = "missing-port"
+			},
+			wantErr: "invalid listen address",
+		},
+		{
+			name: "invalid profiling quota",
+			mutate: func(cfg *Config) {
+				cfg.Jobs.Profiling.MaxConcurrentPerHost = 0
+			},
+			wantErr: "profiling jobs per host",
+		},
+		{
+			name: "invalid agent port",
+			mutate: func(cfg *Config) {
+				cfg.Agent.HTTPPort = 65536
+			},
+			wantErr: "must not exceed 65535",
+		},
+		{
+			name: "invalid status polling interval",
+			mutate: func(cfg *Config) {
+				cfg.Agent.StatusPollingIntervalSeconds = 0
+			},
+			wantErr: "status polling interval",
+		},
+		{
+			name: "invalid consecutive status polling errors",
+			mutate: func(cfg *Config) {
+				cfg.Agent.MaxConsecutiveStatusPollingErrors = 0
+			},
+			wantErr: "maximum consecutive status polling errors",
+		},
+		{
+			name: "invalid aggregation interval",
+			mutate: func(cfg *Config) {
+				cfg.Profiling.AggregationIntervalSeconds = 1200
+			},
+			wantErr: "less than 1200 seconds",
+		},
+		{
+			name: "invalid dashboard URL",
+			mutate: func(cfg *Config) {
+				cfg.Profiling.DashboardBaseURL = "ftp://grafana.example/d"
+			},
+			wantErr: "must use http or https",
+		},
+		{
+			name: "incomplete Elasticsearch",
+			mutate: func(cfg *Config) {
+				cfg.Elasticsearch.Address = "https://search.example"
+			},
+			wantErr: "must be configured together",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := validConfig()
+			tt.mutate(&cfg)
+			assertErrorContains(t, cfg.Validate(), tt.wantErr)
+		})
+	}
+}
+
+func validConfig() Config {
+	cfg := defaultConfig()
+	cfg.Auth.Users = []UserConfig{{
+		ID:          "admin",
+		BearerToken: "secret",
+		Admin:       true,
+	}}
+	return cfg
+}
+
+func loadTestConfig(t *testing.T, contents string) *Config {
+	t.Helper()
+	cfg, err := LoadFile(writeTestConfig(t, contents))
+	if err != nil {
+		t.Fatalf("LoadFile() error = %v", err)
+	}
+	return cfg
+}
+
+func writeTestConfig(t *testing.T, contents string) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "huatuo-apiserver.conf")
+	if err := os.WriteFile(path, []byte(contents), 0o600); err != nil {
+		t.Fatalf("os.WriteFile() error = %v", err)
+	}
+	return path
+}
+
+func assertErrorContains(t *testing.T, err error, want string) {
+	t.Helper()
+	if want == "" {
+		if err != nil {
+			t.Fatalf("error = %v, want nil", err)
+		}
+		return
+	}
+	if err == nil || !strings.Contains(err.Error(), want) {
+		t.Fatalf("error = %v, want substring %q", err, want)
 	}
 }

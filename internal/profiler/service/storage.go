@@ -80,6 +80,11 @@ type ProfileDocument struct {
 	} `json:"tracer_data,omitempty"`
 }
 
+// CapturedAt returns the profiling timestamp while tolerating legacy documents.
+func (d *ProfileDocument) CapturedAt() time.Time {
+	return parseProfileDocumentTime(d.TracerTime, d.UploadedTime)
+}
+
 // SearchFilter defines the search filter.
 type SearchFilter struct {
 	ID                string
@@ -293,7 +298,7 @@ func buildProfileAggregationQuery(filter *SearchFilter) driver.Query {
 			id = filter.ID
 		}
 		query.Filters = append(query.Filters, driver.Filter{
-			Field: profileFieldTracerID,
+			Field: profileFieldTracerID + ".keyword",
 			Op:    driver.OpEq,
 			Value: id,
 		})
