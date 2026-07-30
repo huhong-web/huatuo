@@ -15,19 +15,18 @@
 package events
 
 import (
-	"bufio"
 	"context"
+	"errors"
 	"fmt"
-	"os/exec"
 	"path"
 	"strconv"
 	"strings"
 	"time"
 
 	internalconfig "huatuo-bamai/internal/config"
-	"huatuo-bamai/internal/log"
 	"huatuo-bamai/internal/matcher"
 	"huatuo-bamai/internal/pod"
+	executil "huatuo-bamai/internal/profiler/exec"
 	"huatuo-bamai/internal/toolstream"
 	"huatuo-bamai/internal/utils/kernaddr"
 	"huatuo-bamai/pkg/tracing"
@@ -59,51 +58,14 @@ func (c *dropWatchTracing) Start(ctx context.Context) error {
 		"--max-events-per-second", strconv.FormatUint(cfg.Dropwatch.MaxEventsPerSecond, 10),
 	}
 
-	cmd := exec.Command(path.Join(internalconfig.CoreBinDir, "dropwatch"), args...)
-	stdout, err := cmd.StdoutPipe()
-	if err != nil {
-		return fmt.Errorf("start dropwatch: stdout pipe: %w", err)
-	}
-	stderr, err := cmd.StderrPipe()
-	if err != nil {
-		return fmt.Errorf("start dropwatch: stderr pipe: %w", err)
-	}
-	if err := cmd.Start(); err != nil {
-		return fmt.Errorf("start dropwatch: %w", err)
-	}
-	go func() {
-		scanner := bufio.NewScanner(stdout)
-		for scanner.Scan() {
-			log.Warnf("dropwatch: %s", scanner.Text())
-		}
-	}()
-	go func() {
-		scanner := bufio.NewScanner(stderr)
-		for scanner.Scan() {
-			log.Warnf("dropwatch: %s", scanner.Text())
-		}
-	}()
-
-	log.Infof("dropwatch started pid=%d", cmd.Process.Pid)
-
-	done := make(chan error, 1)
-	go func() {
-		done <- cmd.Wait()
-	}()
-
-	select {
-	case <-ctx.Done():
-		_ = cmd.Process.Kill()
-		<-done
-		log.Info("dropwatch stopped")
-		return nil
-	case werr := <-done:
-		if werr != nil {
-			return fmt.Errorf("dropwatch exited: %w", werr)
-		}
-		log.Info("dropwatch exited")
+	result := executil.ExecCmd(ctx, 0, path.Join(internalconfig.CoreBinDir, "dropwatch"), args...)
+	if errors.Is(result.CmdErr, context.Canceled) {
 		return nil
 	}
+	if result.CmdErr != nil {
+		return fmt.Errorf("run dropwatch: %w", result.CmdErr)
+	}
+	return nil
 }
 
 func handleDropwatchEvent(_ *toolstream.Session, ev *types.DropWatchTracing) error {
