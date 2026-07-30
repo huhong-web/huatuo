@@ -187,7 +187,7 @@ Each event is an NDJSON object (`types.TCPRetransTracing`). Fields tagged with
 | `event_type` | string | `tcp_retransmit_skb`, `tcp_retransmit_synack`, or `tcp_send_loss_probe`. |
 | `ca_state` | uint8 | Congestion-control state: 0=Open, 1=Disorder, 2=CWR, 3=Recovery, 4=Loss. |
 | `icsk_retransmits` | uint8 | Current retransmission counter snapshot. |
-| `icsk_pending` | uint8 | Raw pending timer state from `inet_connection_sock`. |
+| `icsk_pending` | uint8 | Raw pending timer state from `inet_connection_sock`; see the value table below. |
 | `reord_seen` | uint32 | Cumulative flow reorder counter. |
 | `dsack_dups` | uint32 | Cumulative DSACK duplicate counter. |
 | `tcp_seq` | uint32 | `TCP_SKB_CB(skb)->seq` for SKB events, the retransmitted segment start sequence; zero for SYN-ACK events. |
@@ -197,6 +197,18 @@ Each event is an NDJSON object (`types.TCPRetransTracing`). Fields tagged with
 | `skb_addr` | string | Retransmission-queue SKB pointer in hex; absent for SYN-ACK events. |
 | `drop_location` | string | huatuo-bamai correlation heuristic; see §7. |
 | `source` | string | Optional source field; when present, indicates `events` or `tools`. The standalone CLI currently does not set it. |
+
+`icsk_pending` is a timer-state snapshot at the hook, not a stable retransmission-reason enum. TLP classification uses the explicit `event_type=tcp_send_loss_probe` and does not depend on `icsk_pending=5`.
+
+| Value | Kernel state | Meaning |
+|------:|--------------|---------|
+| `0` | None | No transmit-timer event is currently pending. |
+| `1` | `ICSK_TIME_RETRANS` | Retransmission timeout timer (RTO). |
+| `2` | `ICSK_TIME_DACK` | Delayed ACK; modern kernels keep this state in `icsk_ack.pending` and use a separate delayed-ACK timer, so it normally does not appear in `icsk_pending`. |
+| `3` | `ICSK_TIME_PROBE0` | Zero-window probe timer. |
+| `4` | Version-dependent | Current mainline kernels no longer define this value; older kernels used it for Early Retransmit, and still older kernels used it for Keepalive. |
+| `5` | `ICSK_TIME_LOSS_PROBE` | Tail Loss Probe (TLP) timer. |
+| `6` | `ICSK_TIME_REO_TIMEOUT` | Reordering timeout, primarily used by RACK loss detection. |
 
 ### Text output format
 

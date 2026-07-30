@@ -18,6 +18,8 @@ import (
 	"fmt"
 	"testing"
 
+	"golang.org/x/sys/unix"
+
 	"huatuo-bamai/pkg/types"
 )
 
@@ -35,33 +37,33 @@ func TestRetransmitClassification(t *testing.T) {
 		// === Connect phase ===
 		{
 			name:       "SYN retrans (SYN_SENT)",
-			skState:    2,
+			skState:    unix.BPF_TCP_SYN_SENT,
 			tcpFlags:   "SYN",
-			caState:    4,
+			caState:    tcpCALoss,
 			wantPhase:  types.RetransPhaseConnect,
 			wantReason: types.RetransReasonRTO,
 		},
 		{
 			name:       "SYN retrans (SYN_SENT) no caState",
-			skState:    2,
+			skState:    unix.BPF_TCP_SYN_SENT,
 			tcpFlags:   "SYN",
-			caState:    0,
+			caState:    tcpCAOpen,
 			wantPhase:  types.RetransPhaseConnect,
 			wantReason: types.RetransReasonRTO,
 		},
 		{
 			name:       "SYNACK retrans (SYN_RECV)",
-			skState:    3,
+			skState:    unix.BPF_TCP_SYN_RECV,
 			tcpFlags:   "SYN|ACK",
-			caState:    4,
+			caState:    tcpCALoss,
 			wantPhase:  types.RetransPhaseConnect,
 			wantReason: types.RetransReasonRTO,
 		},
 		{
 			name:       "SYNACK retrans (NEW_SYN_RECV)",
-			skState:    12,
+			skState:    unix.BPF_TCP_NEW_SYN_RECV,
 			tcpFlags:   "SYN|ACK",
-			caState:    0,
+			caState:    tcpCAOpen,
 			wantPhase:  types.RetransPhaseConnect,
 			wantReason: types.RetransReasonRTO,
 		},
@@ -69,9 +71,9 @@ func TestRetransmitClassification(t *testing.T) {
 		// === Data phase: RTO ===
 		{
 			name:       "RTO retrans (ESTABLISHED + Loss)",
-			skState:    1,
+			skState:    unix.BPF_TCP_ESTABLISHED,
 			tcpFlags:   "ACK",
-			caState:    4,
+			caState:    tcpCALoss,
 			wantPhase:  types.RetransPhaseData,
 			wantReason: types.RetransReasonRTO,
 		},
@@ -79,9 +81,9 @@ func TestRetransmitClassification(t *testing.T) {
 		// === Data phase: Fast retransmit ===
 		{
 			name:       "Fast retrans (Recovery)",
-			skState:    1,
+			skState:    unix.BPF_TCP_ESTABLISHED,
 			tcpFlags:   "ACK",
-			caState:    3,
+			caState:    tcpCARecovery,
 			wantPhase:  types.RetransPhaseData,
 			wantReason: types.RetransReasonFast,
 		},
@@ -89,17 +91,17 @@ func TestRetransmitClassification(t *testing.T) {
 		// === Data phase: Unknown ===
 		{
 			name:       "Unknown (Open)",
-			skState:    1,
+			skState:    unix.BPF_TCP_ESTABLISHED,
 			tcpFlags:   "ACK",
-			caState:    0,
+			caState:    tcpCAOpen,
 			wantPhase:  types.RetransPhaseData,
 			wantReason: types.RetransReasonUnknown,
 		},
 		{
 			name:       "Unknown (Disorder)",
-			skState:    1,
+			skState:    unix.BPF_TCP_ESTABLISHED,
 			tcpFlags:   "ACK",
-			caState:    1,
+			caState:    tcpCADisorder,
 			wantPhase:  types.RetransPhaseData,
 			wantReason: types.RetransReasonUnknown,
 		},
@@ -107,27 +109,27 @@ func TestRetransmitClassification(t *testing.T) {
 		// === Reorder-prone fast retransmit ===
 		{
 			name:       "Fast retrans + reord_seen>0 -> reorder_prone_fast",
-			skState:    1,
+			skState:    unix.BPF_TCP_ESTABLISHED,
 			tcpFlags:   "ACK",
-			caState:    3,
+			caState:    tcpCARecovery,
 			reordSeen:  1,
 			wantPhase:  types.RetransPhaseData,
 			wantReason: types.RetransReasonReorderProneFast,
 		},
 		{
 			name:       "Fast retrans + dsack_dups>0 -> reorder_prone_fast",
-			skState:    1,
+			skState:    unix.BPF_TCP_ESTABLISHED,
 			tcpFlags:   "ACK",
-			caState:    3,
+			caState:    tcpCARecovery,
 			dsackDups:  2,
 			wantPhase:  types.RetransPhaseData,
 			wantReason: types.RetransReasonReorderProneFast,
 		},
 		{
 			name:       "RTO + reorder fields (irrelevant for RTO)",
-			skState:    1,
+			skState:    unix.BPF_TCP_ESTABLISHED,
 			tcpFlags:   "ACK",
-			caState:    4,
+			caState:    tcpCALoss,
 			reordSeen:  5,
 			dsackDups:  3,
 			wantPhase:  types.RetransPhaseData,
@@ -137,33 +139,33 @@ func TestRetransmitClassification(t *testing.T) {
 		// === Close phase ===
 		{
 			name:       "FIN retrans (FIN_WAIT1)",
-			skState:    4,
+			skState:    unix.BPF_TCP_FIN_WAIT1,
 			tcpFlags:   "FIN|ACK",
-			caState:    4,
+			caState:    tcpCALoss,
 			wantPhase:  types.RetransPhaseClose,
 			wantReason: types.RetransReasonRTO,
 		},
 		{
 			name:       "FIN retrans (LAST_ACK) no caState",
-			skState:    9,
+			skState:    unix.BPF_TCP_LAST_ACK,
 			tcpFlags:   "FIN|ACK",
-			caState:    0,
+			caState:    tcpCAOpen,
 			wantPhase:  types.RetransPhaseClose,
 			wantReason: types.RetransReasonRTO,
 		},
 		{
 			name:       "CLOSE_WAIT residual data Recovery",
-			skState:    8,
+			skState:    unix.BPF_TCP_CLOSE_WAIT,
 			tcpFlags:   "ACK|PSH",
-			caState:    3,
+			caState:    tcpCARecovery,
 			wantPhase:  types.RetransPhaseClose,
 			wantReason: types.RetransReasonFast,
 		},
 		{
 			name:       "CLOSE_WAIT no caState -> RTO fallback",
-			skState:    8,
+			skState:    unix.BPF_TCP_CLOSE_WAIT,
 			tcpFlags:   "ACK",
-			caState:    0,
+			caState:    tcpCAOpen,
 			wantPhase:  types.RetransPhaseClose,
 			wantReason: types.RetransReasonRTO,
 		},
@@ -253,14 +255,25 @@ func TestRetransmitClassificationAllStates(t *testing.T) {
 		"FIN_WAIT1", "FIN_WAIT2", "TIME_WAIT", "CLOSE",
 		"CLOSE_WAIT", "LAST_ACK", "LISTEN", "CLOSING", "NEW_SYN_RECV",
 	}
-	connectStates := map[uint8]bool{2: true, 3: true, 12: true}
-	dataStates := map[uint8]bool{1: true}
-	closeStates := map[uint8]bool{4: true, 5: true, 6: true, 8: true, 9: true, 11: true}
+	connectStates := map[uint8]bool{
+		unix.BPF_TCP_SYN_SENT:     true,
+		unix.BPF_TCP_SYN_RECV:     true,
+		unix.BPF_TCP_NEW_SYN_RECV: true,
+	}
+	dataStates := map[uint8]bool{unix.BPF_TCP_ESTABLISHED: true}
+	closeStates := map[uint8]bool{
+		unix.BPF_TCP_FIN_WAIT1:  true,
+		unix.BPF_TCP_FIN_WAIT2:  true,
+		unix.BPF_TCP_TIME_WAIT:  true,
+		unix.BPF_TCP_CLOSE_WAIT: true,
+		unix.BPF_TCP_LAST_ACK:   true,
+		unix.BPF_TCP_CLOSING:    true,
+	}
 
-	for state := uint8(1); state <= 12; state++ {
+	for state := uint8(unix.BPF_TCP_ESTABLISHED); state <= unix.BPF_TCP_NEW_SYN_RECV; state++ {
 		state := state
 		t.Run(fmt.Sprintf("state=%s(%d)", stateNames[state], state), func(t *testing.T) {
-			phase, _ := classifyRetrans(state, "ACK", 0, 0, 0)
+			phase, _ := classifyRetrans(state, "ACK", tcpCAOpen, 0, 0)
 
 			if connectStates[state] && phase != types.RetransPhaseConnect {
 				t.Errorf("state %s(%d): expected Connect phase, got %v", stateNames[state], state, phase)

@@ -95,7 +95,10 @@ type TCPRetransTracing struct {
 	// Congestion control state (raw BPF fields).
 	CaState         uint8 `json:"ca_state"`         // icsk_ca_state: 0=Open, 3=Recovery, 4=Loss
 	IcskRetransmits uint8 `json:"icsk_retransmits"` // current retrans counter for the connection
-	IcskPending     uint8 `json:"icsk_pending"`     // raw inet_connection_sock timer state
+	// IcskPending is the raw inet_connection_sock timer state: 0=None,
+	// 1=RTO, 3=Probe0, 5=TLP, and 6=REO. Modern kernels keep 2 (DACK)
+	// in icsk_ack.pending; the meaning of 4 depends on the kernel version.
+	IcskPending uint8 `json:"icsk_pending"`
 
 	ReordSeen uint32 `json:"reord_seen,omitempty"` // tp->reord_seen (cumulative)
 	DsackDups uint32 `json:"dsack_dups,omitempty"` // tp->dsack_dups (cumulative)

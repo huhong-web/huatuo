@@ -23,7 +23,7 @@ func TestDropReasonNamesResolve(t *testing.T) {
 		3: "SKB_DROP_REASON_TCP_CSUM",
 	}
 
-	cases := []struct {
+	tests := []struct {
 		name  string
 		input uint32
 		want  string
@@ -34,11 +34,11 @@ func TestDropReasonNamesResolve(t *testing.T) {
 		{name: "unsupported kernel", input: skbDropReasonNotSupported, want: "NOT_SUPPORTED"},
 	}
 
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			got := names.resolve(tc.input)
-			if got != tc.want {
-				t.Errorf("resolve(%d): got %q, want %q", tc.input, got, tc.want)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := names.resolve(tt.input)
+			if got != tt.want {
+				t.Errorf("resolve(%d): got %q, want %q", tt.input, got, tt.want)
 			}
 		})
 	}
@@ -47,7 +47,7 @@ func TestDropReasonNamesResolve(t *testing.T) {
 func TestDropReasonNamesNilResolve(t *testing.T) {
 	var names dropReasonNames
 
-	cases := []struct {
+	tests := []struct {
 		name  string
 		input uint32
 		want  string
@@ -57,11 +57,11 @@ func TestDropReasonNamesNilResolve(t *testing.T) {
 		{name: "unsupported kernel", input: skbDropReasonNotSupported, want: "NOT_SUPPORTED"},
 	}
 
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			got := names.resolve(tc.input)
-			if got != tc.want {
-				t.Errorf("resolve(%d): got %q, want %q", tc.input, got, tc.want)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := names.resolve(tt.input)
+			if got != tt.want {
+				t.Errorf("resolve(%d): got %q, want %q", tt.input, got, tt.want)
 			}
 		})
 	}

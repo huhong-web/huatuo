@@ -14,7 +14,19 @@
 
 package main
 
-import "huatuo-bamai/pkg/types"
+import (
+	"golang.org/x/sys/unix"
+
+	"huatuo-bamai/pkg/types"
+)
+
+const (
+	tcpCAOpen uint8 = iota
+	tcpCADisorder
+	tcpCACWR
+	tcpCARecovery
+	tcpCALoss
+)
 
 func classifyEvent(ev *retransEvent, tcpFlags string) (types.RetransPhase, types.RetransReason) {
 	switch ev.EventType {
@@ -47,15 +59,16 @@ func classifyRetrans(
 
 func phaseFromState(skStateNum uint8, tcpFlags string) types.RetransPhase {
 	switch skStateNum {
-	case 2: // SYN_SENT
+	case unix.BPF_TCP_SYN_SENT:
 		return types.RetransPhaseConnect
-	case 3, 12: // SYN_RECV, NEW_SYN_RECV
+	case unix.BPF_TCP_SYN_RECV, unix.BPF_TCP_NEW_SYN_RECV:
 		return types.RetransPhaseConnect
-	case 1: // ESTABLISHED
+	case unix.BPF_TCP_ESTABLISHED:
 		return types.RetransPhaseData
-	case 4, 8, 9, 11: // FIN_WAIT1, CLOSE_WAIT, LAST_ACK, CLOSING
+	case unix.BPF_TCP_FIN_WAIT1, unix.BPF_TCP_CLOSE_WAIT,
+		unix.BPF_TCP_LAST_ACK, unix.BPF_TCP_CLOSING:
 		return types.RetransPhaseClose
-	case 5, 6: // FIN_WAIT2, TIME_WAIT
+	case unix.BPF_TCP_FIN_WAIT2, unix.BPF_TCP_TIME_WAIT:
 		return types.RetransPhaseClose
 	default:
 		return phaseFromFlags(tcpFlags)
@@ -69,9 +82,9 @@ func reasonFromTree(
 	phase types.RetransPhase,
 ) types.RetransReason {
 	switch caState {
-	case 4: // TCP_CA_Loss
+	case tcpCALoss:
 		return types.RetransReasonRTO
-	case 3: // TCP_CA_Recovery
+	case tcpCARecovery:
 		if isReorderProne(reordSeen, dsackDups) {
 			return types.RetransReasonReorderProneFast
 		}

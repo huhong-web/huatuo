@@ -1,7 +1,3 @@
-// go:build ignore
-
-// Copyright 2026 Didi. Licensed under the Apache License, Version 2.0.
-
 #include "vmlinux.h"
 
 #include <bpf/bpf_core_read.h>
@@ -14,14 +10,11 @@
 #include "bpf_net_namespace.h"
 #include "bpf_pcap_stub.h"
 #include "bpf_ratelimit.h"
-#include "bpf_tcp_reorder.h"
 #include "vmlinux_net.h"
 
 #define RETRANS_EVENT_SKB    1
 #define RETRANS_EVENT_SYNACK 2
 #define RETRANS_EVENT_TLP    3
-
-#define TCP_NEW_SYN_RECV 12
 
 #ifndef bpf_core_field_offset
 #define compat_bpf_core_field_offset(field) \
@@ -49,6 +42,9 @@ struct retrans_event {
 	u8  ca_state;
 	u8  icsk_retransmits;
 	u8  event_type;
+	/* ICSK_TIME_*: 0=None, 1=RTO, 3=Probe0, 5=TLP, 6=REO.
+	 * Modern kernels keep 2 (DACK) in icsk_ack.pending; 4 is
+	 * kernel-version dependent. */
 	u8  icsk_pending;
 	u8  tcp_flags;
 	u8  saddr[16];
@@ -82,9 +78,29 @@ static __always_inline u8 read_ca_state(struct sock *sk)
 	 * and mask instead of hardcoding them. */
 	u8 ca = BPF_CORE_READ_BITFIELD_PROBED(icsk, icsk_ca_state);
 
-	if (ca > 4)
+	if (ca > TCP_CA_Loss)
 		return 0;
 	return ca;
+}
+
+struct reorder_metrics {
+	u32 reord_seen;
+	u32 dsack_dups;
+};
+
+static __always_inline void read_reorder_metrics(struct sock *sk,
+						  struct reorder_metrics *m)
+{
+	if (!sk || !m)
+		return;
+
+	struct tcp_sock *tp = (struct tcp_sock *)sk;
+
+	if (bpf_core_field_exists(((struct tcp_sock *)0)->reord_seen))
+		m->reord_seen = BPF_CORE_READ(tp, reord_seen);
+
+	if (bpf_core_field_exists(((struct tcp_sock *)0)->dsack_dups))
+		m->dsack_dups = BPF_CORE_READ(tp, dsack_dups);
 }
 
 static __always_inline void fill_addrs_v4_from_sk(struct retrans_event *ev,
@@ -213,9 +229,9 @@ static __always_inline void fill_retrans_event_from_sk(struct retrans_event *ev,
 		fill_addrs_v6_from_sk(ev, sk);
 }
 
-static __always_inline void read_retransmit_skb_tcp_info(struct retrans_event *ev,
-							  struct sock *sk,
-							  struct sk_buff *skb)
+static __always_inline void read_retransmit_skb_tcp_fields(struct retrans_event *ev,
+							    struct sock *sk,
+							    struct sk_buff *skb)
 {
 	if (skb) {
 		struct tcp_skb_cb *tcb =
@@ -267,7 +283,7 @@ int retrans_skb(struct tcp_retransmit_skb_ctx *ctx)
 	ev.skb_addr = (u64)(unsigned long)skb;
 	fill_retrans_event_from_sk(&ev, sk);
 
-	read_retransmit_skb_tcp_info(&ev, sk, skb);
+	read_retransmit_skb_tcp_fields(&ev, sk, skb);
 
 	bpf_perf_event_output(ctx, &perf_events, COMPAT_BPF_F_CURRENT_CPU, &ev, sizeof(ev));
 	return 0;

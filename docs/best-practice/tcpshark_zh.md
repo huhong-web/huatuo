@@ -130,7 +130,7 @@ sudo tcpshark --mode retransmit --bpf-path bpf/tcp_retransmit.o \
 | `event_type` | string | `tcp_retransmit_skb`、`tcp_retransmit_synack` 或 `tcp_send_loss_probe`。 |
 | `ca_state` | uint8 | 拥塞控制状态：0=Open、1=Disorder、2=CWR、3=Recovery、4=Loss。 |
 | `icsk_retransmits` | uint8 | 当前重传计数器快照。 |
-| `icsk_pending` | uint8 | `inet_connection_sock` 中原始的待处理定时器状态。 |
+| `icsk_pending` | uint8 | `inet_connection_sock` 中原始的待处理定时器状态，取值见下表。 |
 | `reord_seen` | uint32 | 连接累计乱序计数器。 |
 | `dsack_dups` | uint32 | 累计 DSACK 重复计数器。 |
 | `tcp_seq` | uint32 | SKB 事件中 `TCP_SKB_CB(skb)->seq`，即重传段起始序列号；SYN-ACK 事件中为零。 |
@@ -140,6 +140,18 @@ sudo tcpshark --mode retransmit --bpf-path bpf/tcp_retransmit.o \
 | `skb_addr` | string | 十六进制重传队列 SKB 指针；SYN-ACK 事件中不存在。 |
 | `drop_location` | string | huatuo-bamai 生成的丢包关联启发式结果，见 §7。 |
 | `source` | string | 可选来源字段；存在时标识 `events` 或 `tools`。独立 CLI 当前不设置该字段。 |
+
+`icsk_pending` 是 hook 时刻的定时器状态快照，不是重传原因的稳定枚举。TLP 分类以明确的 `event_type=tcp_send_loss_probe` 为准，不依赖 `icsk_pending=5`。
+
+| 值 | 内核状态 | 含义 |
+|---:|----------|------|
+| `0` | None | 当前没有待处理的发送定时器事件。 |
+| `1` | `ICSK_TIME_RETRANS` | 重传超时定时器（RTO）。 |
+| `2` | `ICSK_TIME_DACK` | 延迟 ACK；现代内核将该状态保存在 `icsk_ack.pending` 并使用独立的 delayed-ACK timer，因此通常不会出现在 `icsk_pending` 中。 |
+| `3` | `ICSK_TIME_PROBE0` | 零窗口探测定时器。 |
+| `4` | 版本相关 | 当前主线内核不再定义该值；旧内核曾将其用于 Early Retransmit，更早的内核曾用于 Keepalive。 |
+| `5` | `ICSK_TIME_LOSS_PROBE` | Tail Loss Probe（TLP）定时器。 |
+| `6` | `ICSK_TIME_REO_TIMEOUT` | 乱序超时定时器，主要用于 RACK 丢包判断。 |
 
 ### 文本输出格式
 
