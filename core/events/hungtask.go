@@ -16,6 +16,7 @@ package events
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"strconv"
@@ -84,7 +85,7 @@ func (c *hungTaskTracing) Update() ([]*metric.Data, error) {
 }
 
 func (c *hungTaskTracing) Start(ctx context.Context) error {
-	b, err := bpf.LoadBpf(bpf.ThisBpfOBJ(), nil)
+	b, err := bpf.LoadBPF(bpf.ThisBpfOBJ(), nil)
 	if err != nil {
 		return err
 	}
@@ -99,7 +100,7 @@ func (c *hungTaskTracing) Start(ctx context.Context) error {
 	}
 	defer reader.Close()
 
-	b.WaitDetachByBreaker(childCtx, cancel)
+	b.DetachOnContextDone(childCtx, cancel)
 
 	for {
 		select {
@@ -108,6 +109,10 @@ func (c *hungTaskTracing) Start(ctx context.Context) error {
 		default:
 			var data abi.HungtaskEvent
 			if err := reader.ReadInto(&data); err != nil {
+				if errors.Is(err, bpf.ErrPerfEventSamplesLost) {
+					log.WithError(err).Warn("lost BPF perf event samples")
+					continue
+				}
 				return fmt.Errorf("hungtask ReadFromPerfEvent: %w", err)
 			}
 

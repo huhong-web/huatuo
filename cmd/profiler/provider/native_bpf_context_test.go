@@ -1,4 +1,4 @@
-// Copyright 2025, 2026 The HuaTuo Authors
+// Copyright 2026 The HuaTuo Authors
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,22 +12,25 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package main
+package provider
 
-import (
-	"fmt"
+import "testing"
 
-	"huatuo-bamai/internal/bpf"
-)
-
-// initBpfManager prepares shared BPF resources for native profilers. The
-// returned cleanup must run on exit so map FDs and pinned objects are released.
-func initBpfManager(duration int) (func(), error) {
-	if err := bpf.Init(&bpf.Option{
-		KeepaliveTimeout: duration,
-	}); err != nil {
-		return nil, fmt.Errorf("init bpf: %w", err)
+func TestValidateStackID(t *testing.T) {
+	tests := []struct {
+		name    string
+		stackID int32
+		want    bool
+	}{
+		{name: "negative ID", stackID: -1, want: false},
+		{name: "zero ID", stackID: 0, want: true},
+		{name: "positive ID", stackID: 1, want: true},
 	}
-
-	return bpf.Shutdown, nil
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := validateStackID(tt.stackID); got != tt.want {
+				t.Fatalf("validateStackID(%d) = %t, want %t", tt.stackID, got, tt.want)
+			}
+		})
+	}
 }

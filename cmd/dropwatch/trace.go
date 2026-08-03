@@ -16,6 +16,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/signal"
@@ -36,10 +37,10 @@ func mainAction(c *cli.Context) error {
 	outputFmt := c.String(cliFlagOutput)
 	sourceTypes := c.String(cliFlagSourceTypes)
 
-	if err := bpf.NewManager(&bpf.Option{KeepaliveTimeout: duration}); err != nil {
-		return fmt.Errorf("dropwatch: init bpf manager: %w", err)
+	if err := bpf.Init(&bpf.Option{KeepaliveTimeout: duration}); err != nil {
+		return fmt.Errorf("dropwatch: init bpf: %w", err)
 	}
-	defer bpf.Close()
+	defer bpf.Shutdown()
 
 	netdevFilterMode, devIfindexes, err := parseNetdevFilterFlags(c.String(cliFlagDevice), c.String(cliFlagDeviceExcluded))
 	if err != nil {
@@ -95,7 +96,7 @@ func mainAction(c *cli.Context) error {
 	}
 	defer reader.Close()
 
-	bpfObj.WaitDetachByBreaker(runCtx, cancel)
+	bpfObj.DetachOnContextDone(runCtx, cancel)
 
 	sink, sinkCleanup, err := newWriter(&writerOption{
 		outputFmt: outputFmt,
@@ -119,6 +120,10 @@ func mainAction(c *cli.Context) error {
 		if err := reader.ReadInto(&ev); err != nil {
 			if runCtx.Err() != nil {
 				return nil
+			}
+			if errors.Is(err, bpf.ErrPerfEventSamplesLost) {
+				log.WithError(err).Warn("lost BPF perf event samples")
+				continue
 			}
 
 			log.Errorf("dropwatch: read: %v", err)

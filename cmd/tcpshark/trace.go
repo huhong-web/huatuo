@@ -16,6 +16,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/signal"
@@ -50,10 +51,10 @@ func runRetransmit(c *cli.Context) error {
 	sourceTypes := c.String(cliFlagSourceTypes)
 	maxEventsPerSecond := c.Uint64(cliFlagMaxEventsPerSecond)
 
-	if err := bpf.NewManager(&bpf.Option{KeepaliveTimeout: duration}); err != nil {
-		return fmt.Errorf("tcpshark: init bpf manager: %w", err)
+	if err := bpf.Init(&bpf.Option{KeepaliveTimeout: duration}); err != nil {
+		return fmt.Errorf("tcpshark: init bpf: %w", err)
 	}
-	defer bpf.Close()
+	defer bpf.Shutdown()
 
 	bpfObj, err := loadTCPRetransBPFWithFilter(
 		c.String(cliFlagBpfPath),
@@ -106,7 +107,7 @@ func runRetransmit(c *cli.Context) error {
 	}
 	defer reader.Close()
 
-	bpfObj.WaitDetachByBreaker(runCtx, cancel)
+	bpfObj.DetachOnContextDone(runCtx, cancel)
 
 	sink, sinkCleanup, err := newWriter(&writerOption{
 		outputFmt: outputFmt,
@@ -125,10 +126,14 @@ func runRetransmit(c *cli.Context) error {
 			return nil
 		}
 
-		var ev abi.RetransmitEvent
+		var ev abi.TCPRetransmitEvent
 		if err := reader.ReadInto(&ev); err != nil {
 			if runCtx.Err() != nil {
 				return nil
+			}
+			if errors.Is(err, bpf.ErrPerfEventSamplesLost) {
+				log.WithError(err).Warn("lost BPF perf event samples")
+				continue
 			}
 			log.Errorf("tcpshark: read retransmit event: %v", err)
 			continue

@@ -59,7 +59,7 @@ func TestFormatEventSkbAddr(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			event := formatEvent(&abi.RetransmitEvent{SKBAddr: tt.skbAddr})
+			event := formatEvent(&abi.TCPRetransmitEvent{SKBAddr: tt.skbAddr})
 			if event.SkbAddr != tt.want {
 				t.Fatalf("SkbAddr = %q, want %q", event.SkbAddr, tt.want)
 			}
@@ -89,12 +89,12 @@ func TestFormatEventTCPFlags(t *testing.T) {
 
 	tests := []struct {
 		name string
-		ev   *abi.RetransmitEvent
+		ev   *abi.TCPRetransmitEvent
 		want string
 	}{
 		{
 			name: "skb flags",
-			ev: &abi.RetransmitEvent{
+			ev: &abi.TCPRetransmitEvent{
 				EventType: retransEventSKU,
 				TCPFlags:  0x18,
 			},
@@ -102,7 +102,7 @@ func TestFormatEventTCPFlags(t *testing.T) {
 		},
 		{
 			name: "synack flags derived from event type",
-			ev: &abi.RetransmitEvent{
+			ev: &abi.TCPRetransmitEvent{
 				EventType: retransEventSynack,
 			},
 			want: "SYN|ACK",
@@ -136,7 +136,7 @@ func TestFormatEventTCPFlags(t *testing.T) {
 func TestFormatEventTLP(t *testing.T) {
 	t.Parallel()
 
-	event := formatEvent(&abi.RetransmitEvent{
+	event := formatEvent(&abi.TCPRetransmitEvent{
 		EventType: retransEventTLP,
 		TCPSeq:    123,
 		TCPAck:    100,
@@ -164,13 +164,13 @@ func TestFormatEventAddresses(t *testing.T) {
 
 	tests := []struct {
 		name      string
-		ev        *abi.RetransmitEvent
+		ev        *abi.TCPRetransmitEvent
 		wantSaddr string
 		wantDaddr string
 	}{
 		{
 			name: "ipv4 uses first four bytes",
-			ev: &abi.RetransmitEvent{
+			ev: &abi.TCPRetransmitEvent{
 				Family: unix.AF_INET,
 				Saddr:  [16]byte{127, 0, 0, 1, 0xff},
 				Daddr:  [16]byte{10, 0, 0, 1, 0xff},
@@ -180,7 +180,7 @@ func TestFormatEventAddresses(t *testing.T) {
 		},
 		{
 			name: "ipv6 uses full sixteen bytes",
-			ev: &abi.RetransmitEvent{
+			ev: &abi.TCPRetransmitEvent{
 				Family: unix.AF_INET6,
 			},
 			wantSaddr: "2001:db8::1",

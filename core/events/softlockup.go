@@ -16,6 +16,7 @@ package events
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync/atomic"
 	"time"
@@ -75,7 +76,7 @@ func (c *softLockupTracing) Update() ([]*metric.Data, error) {
 }
 
 func (c *softLockupTracing) Start(ctx context.Context) error {
-	b, err := bpf.LoadBpf(bpf.ThisBpfOBJ(), nil)
+	b, err := bpf.LoadBPF(bpf.ThisBpfOBJ(), nil)
 	if err != nil {
 		return err
 	}
@@ -90,7 +91,7 @@ func (c *softLockupTracing) Start(ctx context.Context) error {
 	}
 	defer reader.Close()
 
-	b.WaitDetachByBreaker(childCtx, cancel)
+	b.DetachOnContextDone(childCtx, cancel)
 
 	for {
 		select {
@@ -99,6 +100,10 @@ func (c *softLockupTracing) Start(ctx context.Context) error {
 		default:
 			var data abi.SoftlockupEvent
 			if err := reader.ReadInto(&data); err != nil {
+				if errors.Is(err, bpf.ErrPerfEventSamplesLost) {
+					log.WithError(err).Warn("lost BPF perf event samples")
+					continue
+				}
 				return fmt.Errorf("ReadFromPerfEvent fail: %w", err)
 			}
 

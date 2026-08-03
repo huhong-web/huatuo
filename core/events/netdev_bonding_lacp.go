@@ -16,6 +16,7 @@ package events
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -55,7 +56,7 @@ func newLACPTracing() (*tracing.EventTracingAttr, error) {
 }
 
 func (lacp *lacpTracing) Start(ctx context.Context) (err error) {
-	b, err := bpf.LoadBpf(bpf.ThisBpfOBJ(), nil)
+	b, err := bpf.LoadBPF(bpf.ThisBpfOBJ(), nil)
 	if err != nil {
 		return fmt.Errorf("load bpf: %w", err)
 	}
@@ -70,7 +71,7 @@ func (lacp *lacpTracing) Start(ctx context.Context) (err error) {
 	}
 	defer reader.Close()
 
-	b.WaitDetachByBreaker(childCtx, cancel)
+	b.DetachOnContextDone(childCtx, cancel)
 
 	for {
 		select {
@@ -80,6 +81,10 @@ func (lacp *lacpTracing) Start(ctx context.Context) (err error) {
 		default:
 			var tmp abi.NetdevBondingLACPEvent
 			if err := reader.ReadInto(&tmp); err != nil {
+				if errors.Is(err, bpf.ErrPerfEventSamplesLost) {
+					log.WithError(err).Warn("lost BPF perf event samples")
+					continue
+				}
 				return fmt.Errorf("read lacp perf event fail: %w", err)
 			}
 

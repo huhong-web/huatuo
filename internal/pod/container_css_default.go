@@ -161,6 +161,10 @@ func cgroupCssEventSyncHandler(ctx context.Context, reader bpf.PerfEventReader) 
 			default:
 				var data containerCssPerfEvent
 				if err := reader.ReadInto(&data); err != nil {
+					if errors.Is(err, bpf.ErrPerfEventSamplesLost) {
+						log.WithError(err).Warn("lost BPF perf event samples")
+						continue
+					}
 					if !errors.Is(err, types.ErrExitByCancelCtx) {
 						log.Errorf("cgroup css sync read events: %v", err)
 					}
@@ -267,9 +271,9 @@ func cgroupInitSubSysIDs() error {
 }
 
 func cgroupCssInitEventSync() error {
-	cssBpf, err := bpf.LoadBpf("cgroup_css_events.o", nil)
+	cssBpf, err := bpf.LoadBPF("cgroup_css_events.o", nil)
 	if err != nil {
-		return fmt.Errorf("LoadBpf: %w", err)
+		return fmt.Errorf("load bpf: %w", err)
 	}
 	cgroupCssBpfInternal = &cssBpf
 
@@ -288,9 +292,9 @@ func cgroupCssInitEventSync() error {
 }
 
 func cgroupCssExistedSync() error {
-	cssBpf, err := bpf.LoadBpf("cgroup_css_sync.o", nil)
+	cssBpf, err := bpf.LoadBPF("cgroup_css_sync.o", nil)
 	if err != nil {
-		return fmt.Errorf("LoadBpf: %w", err)
+		return fmt.Errorf("load bpf: %w", err)
 	}
 	defer cssBpf.Close()
 
@@ -494,7 +498,7 @@ func resolveCgroupFilesystemPath(root, membershipPath, notifyFile string) (strin
 // triggerContainerCSSSync loads BPF and triggers CSS collection for a specific cgroup path.
 func triggerContainerCSSSync(cgroupPath string) error {
 	// Load BPF for CSS collection
-	cssBpf, err := bpf.LoadBpf("cgroup_css_sync.o", nil)
+	cssBpf, err := bpf.LoadBPF("cgroup_css_sync.o", nil)
 	if err != nil {
 		return fmt.Errorf("load BPF: %w", err)
 	}

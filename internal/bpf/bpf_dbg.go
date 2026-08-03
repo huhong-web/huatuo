@@ -16,6 +16,7 @@ package bpf
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"huatuo-bamai/internal/bpf/abi"
@@ -39,7 +40,7 @@ type BpfDbg struct {
 }
 
 // NewDbg returns a BpfDbg whose debug output is controlled by enabled.
-// Pass the result to LoadBpf via WithBpfDbg and to StartDebugEventLoop so a
+// Pass the result to LoadBPF via WithBpfDbg and to StartDebugEventLoop so a
 // single BPF object's debug state stays isolated from other objects.
 func NewDbg(enabled bool) *BpfDbg {
 	return &BpfDbg{enabled: enabled}
@@ -52,10 +53,10 @@ func (d *BpfDbg) Enabled() bool {
 
 // WithBpfDbg injects the bpf_dbg_enabled constant into consts when this
 // BpfDbg has debug enabled, so callers can fold it into the map passed to
-// LoadBpf:
+// LoadBPF:
 //
 //	dbg := bpf.NewDbg(enable)
-//	b, err := bpf.LoadBpf("x.o", dbg.WithBpfDbg(map[string]any{...}))
+//	b, err := bpf.LoadBPF("x.o", dbg.WithBpfDbg(map[string]any{...}))
 //
 // When debug is disabled consts is returned unchanged.
 //
@@ -100,6 +101,10 @@ func (d *BpfDbg) debugEventLoop(ctx context.Context, reader PerfEventReader) err
 
 		var event BpfDbgEvent
 		if err := reader.ReadInto(&event); err != nil {
+			if errors.Is(err, ErrPerfEventSamplesLost) {
+				log.WithError(err).Warn("lost BPF perf event samples")
+				continue
+			}
 			return fmt.Errorf("read debug event: %w", err)
 		}
 

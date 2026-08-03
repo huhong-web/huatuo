@@ -16,6 +16,7 @@ package events
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"strings"
@@ -113,7 +114,7 @@ func (c *netRecvLatTracing) Start(ctx context.Context) error {
 		"rxlat_thresh_tcpv4":    rxlatThreshTcpv4 * 1000 * 1000,
 		"rxlat_thresh_usercopy": rxlatThreshUsercopy * 1000 * 1000,
 	}
-	b, err := bpf.LoadBpf(bpf.ThisBpfOBJ(), args)
+	b, err := bpf.LoadBPF(bpf.ThisBpfOBJ(), args)
 	if err != nil {
 		return err
 	}
@@ -128,7 +129,7 @@ func (c *netRecvLatTracing) Start(ctx context.Context) error {
 	}
 	defer reader.Close()
 
-	b.WaitDetachByBreaker(childCtx, cancel)
+	b.DetachOnContextDone(childCtx, cancel)
 
 	// save host netns
 	hostNetNSInum, err := netutil.NetNSInumByPid(1)
@@ -143,6 +144,10 @@ func (c *netRecvLatTracing) Start(ctx context.Context) error {
 		default:
 			var pd abi.NetRXLatencyEvent
 			if err := reader.ReadInto(&pd); err != nil {
+				if errors.Is(err, bpf.ErrPerfEventSamplesLost) {
+					log.WithError(err).Warn("lost BPF perf event samples")
+					continue
+				}
 				return fmt.Errorf("read from perf event fail: %w", err)
 			}
 

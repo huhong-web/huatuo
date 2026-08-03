@@ -12,8 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//go:build !didi
-
 package bpf
 
 import (
@@ -22,69 +20,74 @@ import (
 )
 
 func TestDefaultBPFMapOperationsRejectUnknownMap(t *testing.T) {
-	b := &defaultBPF{
-		mapSpecs:    make(map[uint32]mapSpec),
-		mapName2IDs: make(map[string]uint32),
-	}
+	b := &defaultBPF{}
 
 	tests := []struct {
-		name string
-		run  func(*testing.T) error
-		want string
+		name     string
+		run      func(*testing.T) error
+		expected string
 	}{
 		{
-			name: "EventPipe",
+			name: "event pipe",
 			run: func(t *testing.T) error {
 				_, err := b.EventPipe(t.Context(), 42, 4096)
 				return err
 			},
-			want: "bpf: map not found: ID 42",
+			expected: "bpf: map not found: id 42",
 		},
 		{
-			name: "EventPipeByName",
+			name: "event pipe by name",
 			run: func(t *testing.T) error {
 				_, err := b.EventPipeByName(t.Context(), "missing", 4096)
 				return err
 			},
-			want: `bpf: map not found: name "missing"`,
+			expected: `bpf: map not found: name "missing"`,
 		},
 		{
-			name: "ReadMap",
+			name: "attach and event pipe",
+			run: func(t *testing.T) error {
+				_, err := b.AttachAndEventPipe(t.Context(), "missing", 4096)
+				return err
+			},
+			expected: `bpf: map not found: name "missing"`,
+		},
+		{
+			name: "read map",
 			run: func(*testing.T) error {
 				_, err := b.ReadMap(42, nil)
 				return err
 			},
-			want: "bpf: map not found: ID 42",
+			expected: "bpf: map not found: id 42",
 		},
 		{
-			name: "WriteMapItems",
+			name: "write map items",
 			run: func(*testing.T) error {
 				return b.WriteMapItems(42, nil)
 			},
-			want: "bpf: map not found: ID 42",
+			expected: "bpf: map not found: id 42",
 		},
 		{
-			name: "DeleteMapItems",
+			name: "delete map items",
 			run: func(*testing.T) error {
 				return b.DeleteMapItems(42, nil)
 			},
-			want: "bpf: map not found: ID 42",
+			expected: "bpf: map not found: id 42",
 		},
 		{
-			name: "DumpMap",
+			name: "dump map",
 			run: func(*testing.T) error {
 				_, err := b.DumpMap(42)
 				return err
 			},
-			want: "bpf: map not found: ID 42",
+			expected: "bpf: map not found: id 42",
 		},
 		{
-			name: "DumpMapByName",
+			name: "dump map by name",
 			run: func(*testing.T) error {
 				_, err := b.DumpMapByName("missing")
 				return err
 			},
-			want: `bpf: map not found: name "missing"`,
+			expected: `bpf: map not found: name "missing"`,
 		},
 	}
 
@@ -92,10 +95,10 @@ func TestDefaultBPFMapOperationsRejectUnknownMap(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			err := tt.run(t)
 			if !errors.Is(err, ErrMapNotFound) {
-				t.Fatalf("map operation error=%v, want errors.Is ErrMapNotFound", err)
+				t.Fatalf("%s error = %v, want an error matching ErrMapNotFound", tt.name, err)
 			}
-			if err.Error() != tt.want {
-				t.Errorf("map operation error=%q, want %q", err, tt.want)
+			if err.Error() != tt.expected {
+				t.Errorf("%s error = %q, want %q", tt.name, err, tt.expected)
 			}
 		})
 	}

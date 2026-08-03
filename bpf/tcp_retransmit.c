@@ -11,7 +11,7 @@
 #include "bpf_pcap_stub.h"
 #include "bpf_ratelimit.h"
 #include "bpf_skbuff.h"
-#include "abi/retransmit_types.h"
+#include "abi/tcp_retransmit_types.h"
 
 #define RETRANSMIT_EVENT_SKB    1
 #define RETRANSMIT_EVENT_SYNACK 2
@@ -34,7 +34,7 @@ BPF_RATELIMIT_IN_MAP_RC(tcp_retransmit);
 
 char __license[] SEC("license") = "Dual MIT/GPL";
 
-static __always_inline void init_retransmit_event(struct retransmit_event *ev,
+static __always_inline void init_retransmit_event(struct tcp_retransmit_event *ev,
 						  u8 event_type)
 {
 	ev->event_type = event_type;
@@ -83,7 +83,7 @@ static __always_inline void read_reorder_metrics(struct sock *sk,
 		m->dsack_dups = BPF_CORE_READ(tp, dsack_dups);
 }
 
-static __always_inline void fill_addrs(struct retransmit_event *ev,
+static __always_inline void fill_addrs(struct tcp_retransmit_event *ev,
 				       struct sock_common *skc)
 {
 	if (!ev || !skc)
@@ -111,7 +111,7 @@ static __always_inline void fill_addrs(struct retransmit_event *ev,
 }
 
 static __always_inline void read_icsk_pending(struct sock *sk,
-					       struct retransmit_event *ev)
+					       struct tcp_retransmit_event *ev)
 {
 	if (!sk)
 		return;
@@ -125,7 +125,7 @@ static __always_inline void read_icsk_pending(struct sock *sk,
 /* TLP has no retransmission skb at this probe point. snd_nxt is the closest
  * available sequence number for the probe, while snd_una is the oldest
  * unacknowledged sequence number. */
-static __always_inline void read_tlp_tcp_info(struct retransmit_event *ev,
+static __always_inline void read_tlp_tcp_info(struct tcp_retransmit_event *ev,
 					       struct sock *sk)
 {
 	struct tcp_sock *tp = (struct tcp_sock *)sk;
@@ -137,7 +137,7 @@ static __always_inline void read_tlp_tcp_info(struct retransmit_event *ev,
 		ev->tcp_ack = BPF_CORE_READ(tp, snd_una);
 }
 
-static __always_inline void fill_retransmit_event_from_sk(struct retransmit_event *ev,
+static __always_inline void fill_retransmit_event_from_sk(struct tcp_retransmit_event *ev,
 							  struct sock *sk)
 {
 	if (!sk)
@@ -166,7 +166,7 @@ static __always_inline void fill_retransmit_event_from_sk(struct retransmit_even
 	fill_addrs(ev, (struct sock_common *)sk);
 }
 
-static __always_inline void read_retransmit_skb_tcp_fields(struct retransmit_event *ev,
+static __always_inline void read_retransmit_skb_tcp_fields(struct tcp_retransmit_event *ev,
 							    struct sock *sk,
 							    struct sk_buff *skb)
 {
@@ -208,7 +208,7 @@ int retrans_skb(struct tcp_retransmit_skb_ctx *ctx)
 	if (bpf_ratelimited_in_map_rc(ctx, tcp_retransmit))
 		return 0;
 
-	struct retransmit_event ev = {};
+	struct tcp_retransmit_event ev = {};
 
 	init_retransmit_event(&ev, RETRANSMIT_EVENT_SKB);
 
@@ -236,7 +236,7 @@ int retrans_synack(struct trace_event_raw_tcp_retransmit_synack *ctx)
 	if (bpf_ratelimited_in_map_rc(ctx, tcp_retransmit))
 		return 0;
 
-	struct retransmit_event ev = {};
+	struct tcp_retransmit_event ev = {};
 
 	init_retransmit_event(&ev, RETRANSMIT_EVENT_SYNACK);
 
@@ -270,7 +270,7 @@ int retrans_synack(struct trace_event_raw_tcp_retransmit_synack *ctx)
 SEC("kprobe/tcp_send_loss_probe")
 int retrans_tlp(struct pt_regs *ctx)
 {
-	struct retransmit_event ev = {};
+	struct tcp_retransmit_event ev = {};
 	struct sock *sk = (struct sock *)PT_REGS_PARM1_CORE(ctx);
 
 	if (!sk)

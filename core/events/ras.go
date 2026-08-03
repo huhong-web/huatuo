@@ -19,6 +19,7 @@ import (
 	"context"
 	"encoding/binary"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"sync/atomic"
@@ -635,7 +636,7 @@ func dispatchRasTracerData(data *rasEvent) (*RasTracingData, error) {
 }
 
 func (ras *rasTracing) Start(ctx context.Context) error {
-	b, err := bpf.LoadBpf(bpf.ThisBpfOBJ(), nil)
+	b, err := bpf.LoadBPF(bpf.ThisBpfOBJ(), nil)
 	if err != nil {
 		return fmt.Errorf("load bpf: %w", err)
 	}
@@ -650,7 +651,7 @@ func (ras *rasTracing) Start(ctx context.Context) error {
 	}
 	defer reader.Close()
 
-	b.WaitDetachByBreaker(childCtx, cancel)
+	b.DetachOnContextDone(childCtx, cancel)
 
 	return ras.rasEventLoop(childCtx, reader)
 }
@@ -665,6 +666,10 @@ func (ras *rasTracing) rasEventLoop(ctx context.Context, reader bpf.PerfEventRea
 		default:
 			var ev rasEvent
 			if err := reader.ReadInto(&ev); err != nil {
+				if errors.Is(err, bpf.ErrPerfEventSamplesLost) {
+					log.WithError(err).Warn("lost BPF perf event samples")
+					continue
+				}
 				return fmt.Errorf("read ras event: %w", err)
 			}
 

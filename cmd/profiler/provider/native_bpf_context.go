@@ -35,6 +35,12 @@ import (
 // drains the just-frozen ring. ~100ms balances responsiveness and overhead.
 const drainTick = 100 * time.Millisecond
 
+// validateStackID reports whether an ID returned by bpf_get_stackid can index a stack map.
+// Zero is a valid key; only negative values indicate lookup errors.
+func validateStackID(stackID int32) bool {
+	return stackID >= 0
+}
+
 // ringBufferContext holds the shared ring buffer state for A/B buffer management.
 // It encapsulates all the common infrastructure needed for dual-buffer profiling
 // (readers, state map, stack maps) so profilers don't need to pass these around.
@@ -151,14 +157,14 @@ func (r *ringBufferContext) advanceSwapParity() (activeRingBuffer, error) {
 func (r *ringBufferContext) drainActiveRingBuffer(
 	newEvent func() any,
 	convertValue func(int64) int64,
-) (map[processIDName]map[bpfmap.StackTraceID]int64, activeRingBuffer, error) {
+) (map[processKey]map[stackIDPair]int64, activeRingBuffer, error) {
 	ring, err := r.advanceSwapParity()
 	if err != nil {
 		return nil, activeRingBuffer{}, err
 	}
 
 	// Use nested map structure for stack aggregation
-	stackCountsByProc := make(map[processIDName]map[bpfmap.StackTraceID]int64)
+	sampleCountsByProcess := make(map[processKey]map[stackIDPair]int64)
 
 	// Batch-read events until everything the BPF side wrote has been consumed.
 	// The kernel may keep writing to the just-frozen ring briefly after the
@@ -166,15 +172,7 @@ func (r *ringBufferContext) drainActiveRingBuffer(
 	// number of events read equals the BPF-reported count.
 	totalRead := uint64(0)
 	for {
-		batch, err := ring.reader.ReadBatch(newEvent())
-		if err != nil {
-			if errors.Is(err, types.ErrExitByCancelCtx) {
-				return nil, activeRingBuffer{}, err
-			}
-			log.Warnf("read batch: %v", err)
-			break
-		}
-
+		batch, err := ring.reader.ReadBatch(newEvent)
 		totalRead += uint64(len(batch))
 
 		for _, rec := range batch {
@@ -189,7 +187,8 @@ func (r *ringBufferContext) drainActiveRingBuffer(
 			}
 
 			// Skip events without valid stacks
-			if base.Kernstack <= 0 && base.Userstack <= 0 {
+			if !validateStackID(base.Kernstack) &&
+				!validateStackID(base.Userstack) {
 				continue
 			}
 
@@ -203,18 +202,26 @@ func (r *ringBufferContext) drainActiveRingBuffer(
 			}
 
 			// Aggregate by process and stack ID
-			pair := bpfmap.StackTraceID{KernelID: base.Kernstack, UserID: base.Userstack}
+			stackIDs := stackIDPair{KernelStackID: base.Kernstack, UserStackID: base.Userstack}
 			// Extract tgid (process ID) from upper 32 bits of pid_tgid
 			tgid := uint32(base.PIDTGID >> 32)
-			pidName := processIDName{Pid: tgid, Name: procutil.CommToString(base.Comm)}
+			process := processKey{PID: tgid, Comm: procutil.CommToString(base.Comm)}
 
-			if stackCountsByProc[pidName] == nil {
-				stackCountsByProc[pidName] = make(map[bpfmap.StackTraceID]int64)
+			if sampleCountsByProcess[process] == nil {
+				sampleCountsByProcess[process] = make(map[stackIDPair]int64)
 			}
-			stackCountsByProc[pidName][pair] += value
+			sampleCountsByProcess[process][stackIDs] += value
 		}
 
-		log.Debugf("drain batch: read=%d total=%d procs=%d", len(batch), totalRead, len(stackCountsByProc))
+		if err != nil {
+			if errors.Is(err, types.ErrExitByCancelCtx) {
+				return nil, activeRingBuffer{}, err
+			}
+			log.WithError(err).Warn("failed to read BPF event batch")
+			break
+		}
+
+		log.Debugf("drain batch: read=%d total=%d procs=%d", len(batch), totalRead, len(sampleCountsByProcess))
 
 		// An empty batch means the ring is drained for now; avoid spinning
 		// even if the BPF count has not been fully matched.
@@ -234,13 +241,13 @@ func (r *ringBufferContext) drainActiveRingBuffer(
 		}
 	}
 
-	log.Debugf("drain done: totalRead=%d procs=%d", totalRead, len(stackCountsByProc))
+	log.Debugf("drain done: totalRead=%d procs=%d", totalRead, len(sampleCountsByProcess))
 
 	if err := bpfmap.WriteUint64(r.bpf, r.transferStateMapID, ring.sampleCountIdx, 0); err != nil {
 		log.Warnf("reset sample count: %v", err)
 	}
 
-	return stackCountsByProc, ring, nil
+	return sampleCountsByProcess, ring, nil
 }
 
 // aggregateStacksAndEnqueue resolves stack traces and emits aggregated records via enqueue callback.
@@ -267,7 +274,7 @@ func (r *ringBufferContext) drainActiveRingBuffer(
 //     performance-critical path. The memory overhead of keeping stale entries is
 //     bounded by the map size limit (STACK_MAP_ENTRIES = 65536).
 func (r *ringBufferContext) aggregateStacksAndEnqueue(
-	stackCountsByProc map[processIDName]map[bpfmap.StackTraceID]int64,
+	sampleCountsByProcess map[processKey]map[stackIDPair]int64,
 	ring activeRingBuffer,
 	enqueue func(any),
 	convertValue func(int64) int64,
@@ -276,8 +283,8 @@ func (r *ringBufferContext) aggregateStacksAndEnqueue(
 	ustackCache := make(map[int32]string)
 
 	var records int
-	for pidName, stacks := range stackCountsByProc {
-		for stackID, rawValue := range stacks {
+	for process, stacks := range sampleCountsByProcess {
+		for stackIDs, rawValue := range stacks {
 			value := rawValue
 			if convertValue != nil {
 				value = convertValue(rawValue)
@@ -287,22 +294,29 @@ func (r *ringBufferContext) aggregateStacksAndEnqueue(
 				continue
 			}
 
-			if stackID.KernelID > 0 {
-				if _, ok := kstackCache[stackID.KernelID]; !ok {
-					kstackCache[stackID.KernelID] = r.resolveKstackWithFallback(ring, stackID.KernelID)
+			if validateStackID(stackIDs.KernelStackID) {
+				if _, ok := kstackCache[stackIDs.KernelStackID]; !ok {
+					kstackCache[stackIDs.KernelStackID] = r.resolveKstackWithFallback(
+						ring,
+						stackIDs.KernelStackID,
+					)
 				}
 			}
-			if stackID.UserID > 0 {
-				if _, ok := ustackCache[stackID.UserID]; !ok {
-					ustackCache[stackID.UserID] = r.resolveUstackWithFallback(ring, stackID.UserID, pidName.Pid)
+			if validateStackID(stackIDs.UserStackID) {
+				if _, ok := ustackCache[stackIDs.UserStackID]; !ok {
+					ustackCache[stackIDs.UserStackID] = r.resolveUstackWithFallback(
+						ring,
+						stackIDs.UserStackID,
+						process.PID,
+					)
 				}
 			}
 
-			record := &stackEntry{
-				Proc:    &processIDName{Pid: pidName.Pid, Name: pidName.Name},
-				User:    ustackCache[stackID.UserID],
-				Kernel:  kstackCache[stackID.KernelID],
-				Samples: value,
+			record := &stackSample{
+				Process:     process,
+				UserStack:   ustackCache[stackIDs.UserStackID],
+				KernelStack: kstackCache[stackIDs.KernelStackID],
+				Value:       value,
 			}
 
 			enqueue(record)
@@ -310,7 +324,13 @@ func (r *ringBufferContext) aggregateStacksAndEnqueue(
 		}
 	}
 
-	log.Debugf("aggregate: procs=%d kstacks=%d ustacks=%d records=%d", len(stackCountsByProc), len(kstackCache), len(ustackCache), records)
+	log.Debugf(
+		"aggregate: procs=%d kstacks=%d ustacks=%d records=%d",
+		len(sampleCountsByProcess),
+		len(kstackCache),
+		len(ustackCache),
+		records,
+	)
 }
 
 // resolveKstackWithFallback resolves kernel stack with fallback support.

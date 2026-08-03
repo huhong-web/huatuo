@@ -27,6 +27,7 @@ import (
 	"time"
 
 	"huatuo-bamai/internal/bpf"
+	"huatuo-bamai/internal/log"
 	"huatuo-bamai/internal/symbol"
 	"huatuo-bamai/internal/utils/bytesutil"
 	"huatuo-bamai/internal/utils/executil"
@@ -43,7 +44,7 @@ func runTrace(ctx context.Context, bpfPath string, cfg ioConfig, filters map[str
 		return nil, fmt.Errorf("read bpf object: %w", err)
 	}
 
-	b, err := bpf.LoadBpfFromBytes(filepath.Base(bpfPath), bpfBytes, filters)
+	b, err := bpf.LoadBPFFromBytes(filepath.Base(bpfPath), bpfBytes, filters)
 	if err != nil {
 		return nil, fmt.Errorf("load bpf: %w", err)
 	}
@@ -97,6 +98,10 @@ func collectStalls(reader bpf.PerfEventReader, maxStack uint64) ([]types.IOSched
 
 	for {
 		if err := reader.ReadInto(&event); err != nil {
+			if errors.Is(err, bpf.ErrPerfEventSamplesLost) {
+				log.WithError(err).Warn("lost BPF perf event samples")
+				continue
+			}
 			if errors.Is(err, types.ErrExitByCancelCtx) {
 				break
 			}

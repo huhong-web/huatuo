@@ -1,4 +1,4 @@
-// Copyright 2025, 2026 The HuaTuo Authors
+// Copyright 2026 The HuaTuo Authors
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,22 +12,30 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package main
+package provider
 
-import (
-	"fmt"
+type processKey struct {
+	PID  uint32
+	Comm string
+}
 
-	"huatuo-bamai/internal/bpf"
-)
+type stackIDPair struct {
+	KernelStackID int32
+	UserStackID   int32
+}
 
-// initBpfManager prepares shared BPF resources for native profilers. The
-// returned cleanup must run on exit so map FDs and pinned objects are released.
-func initBpfManager(duration int) (func(), error) {
-	if err := bpf.Init(&bpf.Option{
-		KeepaliveTimeout: duration,
-	}); err != nil {
-		return nil, fmt.Errorf("init bpf: %w", err)
-	}
+type stackSample struct {
+	Process     processKey
+	UserStack   string
+	KernelStack string
+	Value       int64
+}
 
-	return bpf.Shutdown, nil
+type lockSample struct {
+	Process         processKey
+	LockAddress     uint64
+	UserStack       string
+	KernelStack     string
+	WaitNanoseconds uint64
+	ContentionCount uint32
 }

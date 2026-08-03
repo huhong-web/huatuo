@@ -151,7 +151,7 @@ func newWriter(opt *writerOption) (writer, func(), error) {
 	}
 }
 
-func formatEvent(ev *abi.RetransmitEvent) *types.TCPRetransTracing {
+func formatEvent(ev *abi.TCPRetransmitEvent) *types.TCPRetransTracing {
 	tcpFlagsRaw := ev.TCPFlags
 	if ev.EventType == retransEventSynack {
 		tcpFlagsRaw = tcpFlagsSynAck

@@ -29,7 +29,7 @@ const (
 	tcpCALoss
 )
 
-func classifyEvent(ev *abi.RetransmitEvent, tcpFlags string) (types.RetransPhase, types.RetransReason) {
+func classifyEvent(ev *abi.TCPRetransmitEvent, tcpFlags string) (types.RetransPhase, types.RetransReason) {
 	switch ev.EventType {
 	case retransEventSynack:
 		return types.RetransPhaseConnect, types.RetransReasonRTO

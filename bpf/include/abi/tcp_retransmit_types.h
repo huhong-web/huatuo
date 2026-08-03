@@ -12,12 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#ifndef __BPF_ABI_RETRANSMIT_H__
-#define __BPF_ABI_RETRANSMIT_H__
+#ifndef __BPF_ABI_TCP_RETRANSMIT_H__
+#define __BPF_ABI_TCP_RETRANSMIT_H__
 
 #include "bpf_abi.h"
 
-struct retransmit_event {
+struct tcp_retransmit_event {
 	u64 ktime_ns;
 	u64 tgid_pid;
 	u64 memcg_css_addr;
@@ -47,6 +47,6 @@ struct retransmit_event {
 	u8  _pad[1];
 };
 
-BPF_ABI_EXPORT(retransmit_event);
+BPF_ABI_EXPORT(tcp_retransmit_event);
 
-#endif /* __BPF_ABI_RETRANSMIT_H__ */
+#endif /* __BPF_ABI_TCP_RETRANSMIT_H__ */
