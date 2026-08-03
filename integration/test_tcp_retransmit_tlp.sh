@@ -27,7 +27,7 @@ PAYLOAD_SIZE=262144 # 256 KB
 
 [[ -x "${TCPSHARK_BIN}" ]] || fatal "tcpshark binary not found: ${TCPSHARK_BIN}"
 [[ -f "${BPF_OBJ}" ]] || fatal "BPF object not found: ${BPF_OBJ}"
-require_nc
+require_python3
 
 cleanup() {
 	[[ -n "${TCPSHARK_PID:-}" ]] && kill "${TCPSHARK_PID}" 2> /dev/null || true
@@ -40,15 +40,13 @@ cleanup() {
 }
 trap cleanup EXIT
 
-log_info "TLP: tcp_send_loss_probe via host iptables (drop data ACKs) + nc"
+log_info "TLP: tcp_send_loss_probe via host iptables with dropped data ACKs"
 
-# 1. Server: nc listens; after 3s (well after iptables rule is installed),
-#    send payload. This ensures ACKs are already being dropped when data
-#    hits the wire, so the server has unacked data and TLP fires.
-(
-	sleep 3
-	head -c "${PAYLOAD_SIZE}" /dev/zero
-) | timeout 14 $(nc_listen_cmd "127.0.0.1" "${TEST_PORT}") > /dev/null 2>&1 &
+# 1. Server: listen immediately, then delay the payload until after the
+#    iptables rule is installed. This leaves unacknowledged data for TLP.
+timeout 14 python3 "${ROOT_DIR}/integration/testdata/tcp_server.py" \
+	--listen-address "127.0.0.1" --port "${TEST_PORT}" \
+	--payload-bytes "${PAYLOAD_SIZE}" --send-delay 3 > /dev/null 2>&1 &
 SRV_PID=$!
 sleep 0.5
 
@@ -63,7 +61,7 @@ timeout 12 bash -c "exec 3<>/dev/tcp/127.0.0.1/${TEST_PORT}; cat <&3 >/dev/null"
 CLI_PID=$!
 
 # 4. Wait for handshake to complete, then drop ACKs to the server.
-#    Must happen before the 3s pipeline delay expires (data send).
+#    Must happen before the server's 3s send delay expires.
 sleep 1
 iptables -I OUTPUT 1 -p tcp --dport "${TEST_PORT}" --tcp-flags ACK ACK -j DROP
 log_info "iptables: DROP ACK (dport=${TEST_PORT}) — client ACKs will be dropped"

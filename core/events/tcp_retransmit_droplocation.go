@@ -71,28 +71,28 @@ func dropLayerMatchCausal(drop *types.DropWatchTracing, retrans *types.TCPRetran
 	var saddr, daddr string
 	switch {
 	case drop.Layers.IPv4 != nil:
-		saddr = drop.Layers.IPv4.Src.String()
-		daddr = drop.Layers.IPv4.Dst.String()
+		saddr = drop.Layers.IPv4.Saddr.String()
+		daddr = drop.Layers.IPv4.Daddr.String()
 	case drop.Layers.IPv6 != nil:
-		saddr = drop.Layers.IPv6.Src.String()
-		daddr = drop.Layers.IPv6.Dst.String()
+		saddr = drop.Layers.IPv6.Saddr.String()
+		daddr = drop.Layers.IPv6.Daddr.String()
 	default:
 		return RetransDropNone
 	}
-	sport := drop.Layers.TCP.SrcPort
-	dport := drop.Layers.TCP.DstPort
+	sport := drop.Layers.TCP.Sport
+	dport := drop.Layers.TCP.Dport
 
-	if (saddr == retrans.Saddr && daddr == retrans.Daddr &&
-		sport == retrans.Sport && dport == retrans.Dport) ||
-		(saddr == retrans.Daddr && daddr == retrans.Saddr &&
-			sport == retrans.Dport && dport == retrans.Sport) {
+	if (saddr == retrans.TCPSaddr && daddr == retrans.TCPDaddr &&
+		sport == retrans.TCPSport && dport == retrans.TCPDport) ||
+		(saddr == retrans.TCPDaddr && daddr == retrans.TCPSaddr &&
+			sport == retrans.TCPDport && dport == retrans.TCPSport) {
 		return RetransDrop5Tuple
 	}
 	return RetransDropNone
 }
 
 func makeRetransKey(ev *types.TCPRetransTracing) connKey {
-	return makeConnKey(ev.Saddr, ev.Daddr, ev.Sport, ev.Dport)
+	return makeConnKey(ev.TCPSaddr, ev.TCPDaddr, ev.TCPSport, ev.TCPDport)
 }
 
 func BuildRetransCorrelationReport(drop *types.DropWatchTracing, retrans *types.TCPRetransTracing) string {
@@ -101,14 +101,14 @@ func BuildRetransCorrelationReport(drop *types.DropWatchTracing, retrans *types.
 	switch causal {
 	case RetransDropDirect:
 		return "DROP caused RETRANS directly (same sk_buff): " +
-			retrans.Saddr + ":" + fmtU16(retrans.Sport) + " > " +
-			retrans.Daddr + ":" + fmtU16(retrans.Dport) +
+			retrans.TCPSaddr + ":" + fmtU16(retrans.TCPSport) + " > " +
+			retrans.TCPDaddr + ":" + fmtU16(retrans.TCPDport) +
 			" phase=" + retrans.Phase + " tcp_reason=" + retrans.TCPReason
 
 	case RetransDrop5Tuple:
 		return "DROP and RETRANS share same connection: " +
-			retrans.Saddr + ":" + fmtU16(retrans.Sport) + " > " +
-			retrans.Daddr + ":" + fmtU16(retrans.Dport) +
+			retrans.TCPSaddr + ":" + fmtU16(retrans.TCPSport) + " > " +
+			retrans.TCPDaddr + ":" + fmtU16(retrans.TCPDport) +
 			" phase=" + retrans.Phase + " tcp_reason=" + retrans.TCPReason
 
 	default:

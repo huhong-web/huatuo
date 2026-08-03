@@ -23,12 +23,6 @@ package types
 
 import "errors"
 
-// Values for tracing event Source fields.
-const (
-	SourceTypesEvent = "events"
-	SourceTypesTool  = "tools"
-)
-
 var (
 	// ErrExitByCancelCtx defined an error canceled by context
 	ErrExitByCancelCtx = errors.New("exit by cancelCtx")

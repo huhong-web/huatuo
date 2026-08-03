@@ -64,11 +64,11 @@ func TestParseIPv4TCP(t *testing.T) {
 	if p.IPv6 != nil {
 		t.Errorf("IPv6: want nil, got %+v", p.IPv6)
 	}
-	if got := p.IPv4.Src.String(); got != "10.0.0.1" {
-		t.Errorf("IPv4.Src: want 10.0.0.1, got %s", got)
+	if got := p.IPv4.Saddr.String(); got != "10.0.0.1" {
+		t.Errorf("IPv4.Saddr: want 10.0.0.1, got %s", got)
 	}
-	if got := p.IPv4.Dst.String(); got != "10.0.0.2" {
-		t.Errorf("IPv4.Dst: want 10.0.0.2, got %s", got)
+	if got := p.IPv4.Daddr.String(); got != "10.0.0.2" {
+		t.Errorf("IPv4.Daddr: want 10.0.0.2, got %s", got)
 	}
 	if p.IPv4.Version != 4 {
 		t.Errorf("IPv4.Version: want 4, got %d", p.IPv4.Version)
@@ -97,11 +97,11 @@ func TestParseIPv4TCP(t *testing.T) {
 	if p.TCP == nil {
 		t.Fatalf("TCP: want non-nil, got nil")
 	}
-	if p.TCP.SrcPort != 12345 {
-		t.Errorf("TCP.SrcPort: want 12345, got %d", p.TCP.SrcPort)
+	if p.TCP.Sport != 12345 {
+		t.Errorf("TCP.Sport: want 12345, got %d", p.TCP.Sport)
 	}
-	if p.TCP.DstPort != 80 {
-		t.Errorf("TCP.DstPort: want 80, got %d", p.TCP.DstPort)
+	if p.TCP.Dport != 80 {
+		t.Errorf("TCP.Dport: want 80, got %d", p.TCP.Dport)
 	}
 	if p.TCP.DataOffset != 5 {
 		t.Errorf("TCP.DataOffset: want 5, got %d", p.TCP.DataOffset)
@@ -120,7 +120,7 @@ func TestParseIPv4TCP(t *testing.T) {
 	}
 }
 
-func TestFormatTCPFlags(t *testing.T) {
+func TestTCPFlagStrings(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
@@ -164,8 +164,8 @@ func TestFormatTCPFlags(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			if got := FormatTCPFlags(tt.flags); got != tt.want {
-				t.Errorf("FormatTCPFlags(0x%02x) = %q, want %q", tt.flags, got, tt.want)
+			if got := TCPFlagStrings[tt.flags]; got != tt.want {
+				t.Errorf("TCPFlagStrings[0x%02x] = %q, want %q", tt.flags, got, tt.want)
 			}
 		})
 	}
@@ -188,8 +188,8 @@ func TestParseIPv4UDP(t *testing.T) {
 	if p.IPv4 == nil || p.UDP == nil {
 		t.Fatalf("want IPv4+UDP, got %+v", p)
 	}
-	if p.UDP.SrcPort != 5353 || p.UDP.DstPort != 53 {
-		t.Errorf("ports: want 5353>53, got %d>%d", p.UDP.SrcPort, p.UDP.DstPort)
+	if p.UDP.Sport != 5353 || p.UDP.Dport != 53 {
+		t.Errorf("ports: want 5353>53, got %d>%d", p.UDP.Sport, p.UDP.Dport)
 	}
 	if got := p.Label; got != "IPv4/UDP" {
 		t.Errorf("Label: want IPv4/UDP, got %s", got)
@@ -268,11 +268,11 @@ func TestParseWithEthHdr(t *testing.T) {
 	if p.Ether == nil {
 		t.Fatalf("Ether: want non-nil, got nil")
 	}
-	if p.Ether.Src != "aa:bb:cc:dd:ee:ff" {
-		t.Errorf("Ether.Src: want aa:bb:cc:dd:ee:ff, got %s", p.Ether.Src)
+	if p.Ether.Saddr != "aa:bb:cc:dd:ee:ff" {
+		t.Errorf("Ether.Saddr: want aa:bb:cc:dd:ee:ff, got %s", p.Ether.Saddr)
 	}
-	if p.Ether.Dst != "11:22:33:44:55:66" {
-		t.Errorf("Ether.Dst: want 11:22:33:44:55:66, got %s", p.Ether.Dst)
+	if p.Ether.Daddr != "11:22:33:44:55:66" {
+		t.Errorf("Ether.Daddr: want 11:22:33:44:55:66, got %s", p.Ether.Daddr)
 	}
 	if p.Ether.Type != "IPv4" {
 		t.Errorf("Ether.Type: want IPv4, got %s", p.Ether.Type)

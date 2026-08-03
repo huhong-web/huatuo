@@ -15,6 +15,7 @@ COMMAMND_DEPS=(
 	"kubectl"
 	"curl"
 	"wget"
+	"python3"
 )
 
 function check_command_deps() {
@@ -103,7 +104,7 @@ function prapre_test_env() {
 			# basic
 			"make" "libbpf-dev" "clang" "git" "gcc" "jq" "capnproto"
 			# tcpshark retransmit integration test deps
-			"iptables" "iproute2"
+			"iptables" "iproute2" "python3"
 		)
 		missing_packages=()
 
@@ -122,13 +123,6 @@ function prapre_test_env() {
 			# wait for unattended-upgrades to release /var/lib/dpkg/lock-frontend
 			sudo flock --wait 300 /var/lib/dpkg/lock-frontend true || true
 			sudo apt-get install -y "${missing_packages[@]}"
-		fi
-		if ! command -v nc > /dev/null 2>&1; then
-			sudo apt-get update
-			sudo flock --wait 300 /var/lib/dpkg/lock-frontend true || true
-			sudo apt-get install -y netcat-openbsd \
-				|| sudo apt-get install -y netcat-traditional \
-				|| sudo apt-get install -y ncat
 		fi
 		# Ubuntu 20.04 Default clang-10 Has a CO-RE Relocation Bug (Fixed in LLVM 12 / D87153) — Use clang-12 Instead
 		[[ "$OS_DISTRO" != "ubuntu20.04" ]] || { sudo apt-get install -y clang-12 && sudo ln -sf /usr/bin/clang-12 /usr/local/bin/clang; }

@@ -26,21 +26,21 @@ const rateLimitEventBufferSize = 64
 
 // RateLimiter connects userspace configuration and alerts to a named BPF rate limiter.
 type RateLimiter struct {
+	name             string
 	intervalConstant string
 	burstConstant    string
 	maxBurstConstant string
 	eventMap         string
-	logPrefix        string
 }
 
 // NewRateLimiter creates a userspace controller for a BPF_RATELIMIT_IN_MAP_RC instance.
-func NewRateLimiter(name, logPrefix string) *RateLimiter {
+func NewRateLimiter(name string) *RateLimiter {
 	return &RateLimiter{
+		name:             name,
 		intervalConstant: "bpf_rlimit_interval_" + name,
 		burstConstant:    "bpf_rlimit_burst_" + name,
 		maxBurstConstant: "bpf_rlimit_max_burst_" + name,
 		eventMap:         "event_bpf_rlimit_" + name,
-		logPrefix:        logPrefix,
 	}
 }
 
@@ -63,7 +63,7 @@ func (r *RateLimiter) ApplyConstants(consts map[string]any, maxEventsPerSecond u
 func (r *RateLimiter) OpenEventPipe(ctx context.Context, b BPF) (PerfEventReader, error) {
 	reader, err := b.EventPipeByName(ctx, r.eventMap, rateLimitEventBufferSize)
 	if err != nil {
-		return nil, fmt.Errorf("%s: open rate-limit event pipe: %w", r.logPrefix, err)
+		return nil, fmt.Errorf("%s: open rate-limit event pipe: %w", r.name, err)
 	}
 	return reader, nil
 }
@@ -82,13 +82,13 @@ func (r *RateLimiter) ReadEvents(ctx context.Context, reader PerfEventReader, ev
 				return
 			}
 
-			log.Errorf("%s: rate-limit reader: %v", r.logPrefix, err)
+			log.Errorf("%s: rate-limit reader: %v", r.name, err)
 			continue
 		}
 
 		log.Warnf(
 			"%s: rate limit hit (configured=%d/s, window_events=%d, window_missed=%d, total_events=%d, total_missed=%d)",
-			r.logPrefix,
+			r.name,
 			eventsPerSecond,
 			event.Events,
 			event.Nmissed,

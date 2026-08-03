@@ -214,13 +214,13 @@ sudo dropwatch --output json --duration 10 --bpf-path bpf/dropwatch.o | jq -c 'd
 | `observed_timestamp`     | string   | 采集到事件的 UTC 时间戳（RFC3339Nano）        |
 | `type`                   | string   | 事件类型保留字段，当前为空字符串              |
 | `drop_reason`            | string   | 丢包原因保留字段，当前为空字符串              |
-| `source`                 | string   | 事件来源，存在时标识 `events` 或 `tools`（omitempty） |
+| `source`                 | string   | 事件来源；独立运行 dropwatch 时为 `tools`，由 huatuo-bamai 启动时为 `events` |
 | `comm`                   | string   | 丢包时的进程名                                |
 | `pid`                    | uint64   | 进程 TGID                                     |
 | `container_id`           | string   | 容器 ID（由 huatuo-bamai 解析填充，omitempty）|
 | `memory_cgroup_css_addr` | string   | 内存 cgroup CSS 地址，用于容器归属解析        |
 | `net_namespace_cookie`   | uint64   | 网络命名空间 cookie，用于容器归属解析         |
-| `net_namespace_inode`    | uint32   | 网络命名空间 inode，用于容器归属解析          |
+| `net_namespace_inum`    | uint32   | 网络命名空间 inum，用于容器归属解析           |
 | `netdev_name`            | string   | 网络设备名（如 `eth0`）                       |
 | `netdev_ifindex`         | uint32   | 网络接口索引                                  |
 | `netdev_queue_mapping`   | uint32   | TX 队列映射                                   |
@@ -236,10 +236,10 @@ sudo dropwatch --output json --duration 10 --bpf-path bpf/dropwatch.o | jq -c 'd
 | 字段           | 说明                                                         |
 | -------------- | ------------------------------------------------------------ |
 | `layers.label` | 协议组合标签，如 `IPv4/TCP`、`IPv6/UDP`、`ARP`、`unknown`    |
-| `layers.ether` | 二层字段：`src`、`dst`、`type`、`len`（仅 802.3 帧存在）    |
-| `layers.ipv4`  | IPv4 字段：`version`、`ihl`、`tos`、`len`、`id`、`flags`、`frag_offset`、`ttl`、`protocol`、`checksum`、`src`、`dst` |
-| `layers.ipv6`  | IPv6 字段：`version`、`traffic_class`、`flow_label`、`len`、`next_header`、`hop_limit`、`src`、`dst` |
-| `layers.tcp`   | TCP 字段：`sport`、`dport`、`seq`、`ack`、`data_offset`、`flags`、`window`、`checksum`、`urgent`、`sk_state` |
+| `layers.ether` | 二层字段：`saddr`、`daddr`、`type`、`len`（仅 802.3 帧存在）    |
+| `layers.ipv4`  | IPv4 字段：`version`、`ihl`、`tos`、`len`、`id`、`flags`、`frag_offset`、`ttl`、`protocol`、`checksum`、`saddr`、`daddr` |
+| `layers.ipv6`  | IPv6 字段：`version`、`traffic_class`、`flow_label`、`len`、`next_header`、`hop_limit`、`saddr`、`daddr` |
+| `layers.tcp`   | TCP 字段：`sport`、`dport`、`seq`、`ack_seq`、`data_offset`、`flags`、`window`、`checksum`、`urgent`、`sk_state` |
 | `layers.udp`   | UDP 字段：`sport`、`dport`、`len`、`checksum`                |
 | `layers.icmp`  | ICMP/ICMPv6 字段：`type`、`code`、`checksum`、`id`、`seq`    |
 | `layers.arp`   | ARP 字段：`addr_type`、`protocol`、`hw_address_size`、`prot_address_size`、`operation`、`sender_mac`、`sender_ip`、`target_mac`、`target_ip` |

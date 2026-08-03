@@ -41,9 +41,9 @@ type writer interface {
 type textWriter struct{ w io.Writer }
 
 func (s *textWriter) Write(ev *types.DropWatchTracing) error {
-	if _, err := fmt.Fprintf(s.w, "%s reason=%s len=%d dev=%s pid=%d[%s] addr=%s\n",
+	if _, err := fmt.Fprintf(s.w, "%s reason=%s len=%d dev=%s pid=%d[%s] addr=%s source=%s\n",
 		ev.ObservedTimestamp, ev.DropReason,
-		ev.PacketLen, ev.NetdevName, ev.Pid, ev.Comm, ev.PacketSkbAddr); err != nil {
+		ev.PacketLen, ev.NetdevName, ev.Pid, ev.Comm, ev.PacketSkbAddr, ev.Source); err != nil {
 		return err
 	}
 
@@ -128,7 +128,7 @@ func formatEvent(ev *abi.DropwatchPacketEvent) *types.DropWatchTracing {
 		Pid:                 ev.Meta.TGIDPID >> 32,
 		MemoryCgroupCSSAddr: kernaddr.Format(ev.Meta.MemcgCSSAddr),
 		NetNamespaceCookie:  ev.Meta.NetCookie,
-		NetNamespaceInode:   ev.Meta.NetInum,
+		NetNamespaceInum:    ev.Meta.NetInum,
 		NetdevName:          bytesutil.ToStr(ev.Meta.DevName[:]),
 		NetdevIfindex:       ev.Meta.Ifindex,
 		NetdevQueueMapping:  ev.Meta.QueueMapping,

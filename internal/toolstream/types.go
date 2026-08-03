@@ -12,30 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#ifndef __BPF_ABI_NET_RX_LATENCY_H__
-#define __BPF_ABI_NET_RX_LATENCY_H__
+package toolstream
 
-#include "bpf_abi.h"
-
-struct net_rx_latency_event {
-	u8 comm[COMPAT_TASK_COMM_LEN];
-	u64 latency;
-	u64 tgid_pid;
-	u64 pkt_len;
-	u16 tcp_sport;
-	u16 tcp_dport;
-	u32 tcp_saddr;
-	u32 tcp_daddr;
-	u32 tcp_seq;
-	u32 tcp_ack_seq;
-	u8 tcp_state;
-	u8 lat_stage;
-	u8 pad[2];
-	u8 netdev_name[IFNAMSIZ];
-	u32 net_inum;
-	u64 net_cookie;
-};
-
-BPF_ABI_EXPORT(net_rx_latency_event);
-
-#endif /* __BPF_ABI_NET_RX_LATENCY_H__ */
+// Values for tracing event Source fields.
+const (
+	SourceTypesEvent = "events"
+	SourceTypesTool  = "tools"
+)

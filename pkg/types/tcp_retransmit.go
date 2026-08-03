@@ -75,16 +75,24 @@ type TCPRetransTracing struct {
 	ContainerID        string `json:"container_id,omitempty"`
 	MemcgCssAddr       uint64 `json:"memcg_css,omitempty"`
 	NetNamespaceCookie uint64 `json:"net_namespace_cookie,omitempty"`
-	NetNamespaceInode  uint32 `json:"net_namespace_inode,omitempty"`
+	NetNamespaceInum   uint32 `json:"net_namespace_inum,omitempty"`
 
-	// Connection identity.
-	Saddr string `json:"saddr"`
-	Daddr string `json:"daddr"`
-	Sport uint16 `json:"sport"`
-	Dport uint16 `json:"dport"`
-
-	// TCP state machine.
-	State string `json:"tcp_state"` // e.g. "ESTABLISHED", "SYN_SENT", "SYN_RECV"
+	// TCP connection and packet fields. For tcp_retransmit_skb,
+	// tcp_seq/tcp_end_seq come from TCP_SKB_CB(skb), and tcp_ack_seq comes
+	// from tcp_sk(sk)->rcv_nxt. The skb in tcp_retransmit_skb is headerless,
+	// so tcphdr.seq/ack_seq are not reliable. tcp_flags is the rendered TCP
+	// flag set, e.g. "ACK|PSH". For tcp_retransmit_synack, tcp_flags is
+	// derived from the event type. For tcp_send_loss_probe, tcp_seq/tcp_ack_seq
+	// contain snd_nxt/snd_una and the remaining TCP metadata is unavailable.
+	TCPState  string `json:"tcp_state"` // e.g. "ESTABLISHED", "SYN_SENT", "SYN_RECV"
+	TCPSaddr  string `json:"tcp_saddr"`
+	TCPDaddr  string `json:"tcp_daddr"`
+	TCPSport  uint16 `json:"tcp_sport"`
+	TCPDport  uint16 `json:"tcp_dport"`
+	TCPSeq    uint32 `json:"tcp_seq"`
+	TCPAckSeq uint32 `json:"tcp_ack_seq"`
+	TCPEndSeq uint32 `json:"tcp_end_seq,omitempty"`
+	TCPFlags  string `json:"tcp_flags,omitempty"`
 
 	// Phase classification.
 	Phase string `json:"phase"` // "connect", "data", "close"
@@ -102,19 +110,6 @@ type TCPRetransTracing struct {
 
 	ReordSeen uint32 `json:"reord_seen,omitempty"` // tp->reord_seen (cumulative)
 	DsackDups uint32 `json:"dsack_dups,omitempty"` // tp->dsack_dups (cumulative)
-
-	// TCP sequence numbers.
-	// For tcp_retransmit_skb, tcp_seq/tcp_end_seq come from
-	// TCP_SKB_CB(skb), and tcp_ack comes from tcp_sk(sk)->rcv_nxt. The skb in
-	// tcp_retransmit_skb is headerless, so tcphdr.seq/ack_seq are not reliable.
-	// tcp_flags is the rendered TCP flag set, e.g. "ACK|PSH".
-	// For tcp_retransmit_synack, tcp_flags is derived from the event type.
-	// For tcp_send_loss_probe, tcp_seq/tcp_ack contain snd_nxt/snd_una and the
-	// remaining TCP metadata is unavailable at the probe point.
-	TCPSeq    uint32 `json:"tcp_seq"`
-	TCPAck    uint32 `json:"tcp_ack"`
-	TCPEndSeq uint32 `json:"tcp_end_seq,omitempty"`
-	TCPFlags  string `json:"tcp_flags,omitempty"`
 
 	// Kernel internals.
 	SkbAddr string `json:"skb_addr,omitempty"` // the sk_buff pointer being retransmitted

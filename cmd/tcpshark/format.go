@@ -24,6 +24,7 @@ import (
 
 	"golang.org/x/sys/unix"
 
+	"huatuo-bamai/internal/bpf/abi"
 	"huatuo-bamai/internal/packet"
 	"huatuo-bamai/internal/toolstream"
 	"huatuo-bamai/internal/utils/bytesutil"
@@ -45,11 +46,11 @@ func (s *textWriter) Write(ev *types.TCPRetransTracing) error {
 		"[%s/%s] %s:%d > %s:%d state=%s event_type=%s",
 		ev.Phase,
 		ev.TCPReason,
-		ev.Saddr,
-		ev.Sport,
-		ev.Daddr,
-		ev.Dport,
-		ev.State,
+		ev.TCPSaddr,
+		ev.TCPSport,
+		ev.TCPDaddr,
+		ev.TCPDport,
+		ev.TCPState,
 		ev.EventType,
 	)
 	if ev.EventType == "tcp_retransmit_synack" {
@@ -62,7 +63,7 @@ func (s *textWriter) Write(ev *types.TCPRetransTracing) error {
 	if ev.TCPEndSeq != 0 {
 		detail += fmt.Sprintf(" end=%d", ev.TCPEndSeq)
 	}
-	detail += fmt.Sprintf(" ack=%d", ev.TCPAck)
+	detail += fmt.Sprintf(" ack=%d", ev.TCPAckSeq)
 	if ev.TCPFlags != "" {
 		detail += " flags=" + ev.TCPFlags
 	}
@@ -89,8 +90,8 @@ func (s *textWriter) Write(ev *types.TCPRetransTracing) error {
 	if ev.NetNamespaceCookie != 0 {
 		detail += fmt.Sprintf(" net_namespace_cookie=%d", ev.NetNamespaceCookie)
 	}
-	if ev.NetNamespaceInode != 0 {
-		detail += fmt.Sprintf(" net_namespace_inode=%d", ev.NetNamespaceInode)
+	if ev.NetNamespaceInum != 0 {
+		detail += fmt.Sprintf(" net_namespace_inum=%d", ev.NetNamespaceInum)
 	}
 	if ev.DropLocation != "" {
 		detail += " drop_location=" + ev.DropLocation
@@ -150,12 +151,12 @@ func newWriter(opt *writerOption) (writer, func(), error) {
 	}
 }
 
-func formatEvent(ev *retransEvent) *types.TCPRetransTracing {
+func formatEvent(ev *abi.RetransmitEvent) *types.TCPRetransTracing {
 	tcpFlagsRaw := ev.TCPFlags
 	if ev.EventType == retransEventSynack {
 		tcpFlagsRaw = tcpFlagsSynAck
 	}
-	tcpFlags := packet.FormatTCPFlags(tcpFlagsRaw)
+	tcpFlags := packet.TCPFlagStrings[tcpFlagsRaw]
 	phase, reason := classifyEvent(ev, tcpFlags)
 
 	var saddr, daddr string
@@ -182,15 +183,19 @@ func formatEvent(ev *retransEvent) *types.TCPRetransTracing {
 		ObservedTimestamp:  time.Now().UTC().Format(time.RFC3339Nano),
 		TCPReason:          reason.String(),
 		Comm:               bytesutil.ToStr(ev.Comm[:]),
-		Pid:                ev.TgidPid >> 32,
-		MemcgCssAddr:       ev.MemcgCssAddr,
+		Pid:                ev.TGIDPID >> 32,
+		MemcgCssAddr:       ev.MemcgCSSAddr,
 		NetNamespaceCookie: ev.NetCookie,
-		NetNamespaceInode:  ev.NetInode,
-		Saddr:              saddr,
-		Daddr:              daddr,
-		Sport:              ev.Sport,
-		Dport:              ev.Dport,
-		State:              tcpStateNameRaw(uint8(ev.State)),
+		NetNamespaceInum:   ev.NetInum,
+		TCPState:           tcpStateNameRaw(uint8(ev.State)),
+		TCPSaddr:           saddr,
+		TCPDaddr:           daddr,
+		TCPSport:           ev.Sport,
+		TCPDport:           ev.Dport,
+		TCPSeq:             ev.TCPSeq,
+		TCPAckSeq:          ev.TCPAck,
+		TCPEndSeq:          ev.TCPEndSeq,
+		TCPFlags:           tcpFlags,
 		Phase:              phase.String(),
 		EventType:          eventTypeStr,
 		CaState:            ev.CaState,
@@ -198,11 +203,7 @@ func formatEvent(ev *retransEvent) *types.TCPRetransTracing {
 		IcskPending:        ev.IcskPending,
 		ReordSeen:          ev.ReordSeen,
 		DsackDups:          ev.DsackDups,
-		TCPSeq:             ev.TCPSeq,
-		TCPAck:             ev.TCPAck,
-		TCPEndSeq:          ev.TCPEndSeq,
-		TCPFlags:           tcpFlags,
-		SkbAddr:            kernaddr.Format(ev.SkbAddr),
+		SkbAddr:            kernaddr.Format(ev.SKBAddr),
 	}
 }
 

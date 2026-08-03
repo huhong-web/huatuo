@@ -36,7 +36,7 @@ type DropWatchTracing struct {
 	ContainerID         string         `json:"container_id,omitempty"`
 	MemoryCgroupCSSAddr string         `json:"memory_cgroup_css_addr"`
 	NetNamespaceCookie  uint64         `json:"net_namespace_cookie"`
-	NetNamespaceInode   uint32         `json:"net_namespace_inode"`
+	NetNamespaceInum    uint32         `json:"net_namespace_inum"`
 	NetdevName          string         `json:"netdev_name"`
 	NetdevIfindex       uint32         `json:"netdev_ifindex"`
 	NetdevQueueMapping  uint32         `json:"netdev_queue_mapping"`

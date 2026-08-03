@@ -36,49 +36,8 @@ skip() {
 
 # --------------------------------- utils ------------------------------------
 
-# nc_listen_cmd prints the nc listen invocation that works on this nc flavor.
-# CentOS/RHEL ships nmap-ncat:       nc -l ADDRESS PORT
-# Ubuntu commonly ships OpenBSD nc:  nc -l -s ADDRESS -p PORT
-# Minimal images may ship BusyBox nc: nc -l -p PORT
-# Usage: nc_listen_cmd <address> <port>
-nc_listen_cmd() {
-	local address=$1 port=$2
-	case "${NC_FLAVOR:-}" in
-	ncat) echo "nc -l ${address} ${port}" ;;
-	openbsd | traditional) echo "nc -l -s ${address} -p ${port}" ;;
-	busybox) echo "nc -l -p ${port}" ;;
-	*) fatal "unsupported nc flavor: ${NC_FLAVOR:-unknown}" ;;
-	esac
-}
-
-# detect_nc_flavor sets NC_FLAVOR by inspecting nc version/help output.
-detect_nc_flavor() {
-	[[ -n "${NC_FLAVOR:-}" ]] && return 0
-
-	local nc_info
-	nc_info="$(
-		nc --version 2>&1 || true
-		nc -h 2>&1 || true
-	)"
-
-	if grep -qi "Ncat" <<< "${nc_info}"; then
-		NC_FLAVOR=ncat
-	elif grep -Eqi "OpenBSD|Debian patchlevel" <<< "${nc_info}"; then
-		NC_FLAVOR=openbsd
-	elif grep -Eqi "netcat-traditional|v1\.10" <<< "${nc_info}"; then
-		NC_FLAVOR=traditional
-	elif grep -qi "BusyBox" <<< "${nc_info}"; then
-		NC_FLAVOR=busybox
-	else
-		fatal "unsupported nc implementation (need nmap-ncat, netcat-openbsd, netcat-traditional, or BusyBox nc)"
-	fi
-	log_info "nc flavor: ${NC_FLAVOR}"
-}
-
-# require_nc aborts if no nc-compatible listener is available.
-require_nc() {
-	command -v nc > /dev/null 2>&1 || fatal "nc not found (CentOS: yum install -y nmap-ncat; Ubuntu: apt install -y netcat-openbsd || apt install -y netcat-traditional)"
-	detect_nc_flavor
+require_python3() {
+	command -v python3 > /dev/null 2>&1 || fatal "python3 not found"
 }
 
 assert_eq() {

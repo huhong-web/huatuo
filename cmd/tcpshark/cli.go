@@ -20,6 +20,7 @@ import (
 	"github.com/urfave/cli/v2"
 
 	"huatuo-bamai/internal/log"
+	"huatuo-bamai/internal/toolstream"
 )
 
 const (
@@ -32,6 +33,7 @@ const (
 	cliFlagOutputStorage      = "output-storage"
 	cliFlagTaskID             = "task-id"
 	cliFlagMaxEventsPerSecond = "max-events-per-second"
+	cliFlagSourceTypes        = "source-types"
 )
 
 const (
@@ -83,6 +85,11 @@ func appFlags() []cli.Flag {
 		&cli.StringFlag{
 			Name:  cliFlagTaskID,
 			Usage: "task ID to associate with this session (requires --output-storage)",
+		},
+		&cli.StringFlag{
+			Name:   cliFlagSourceTypes,
+			Value:  toolstream.SourceTypesTool,
+			Hidden: true,
 		},
 	}
 }

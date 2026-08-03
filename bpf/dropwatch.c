@@ -9,7 +9,7 @@
 #include "bpf_pcap_stub.h"
 #include "bpf_ratelimit.h"
 #include "bpf_skb_filter.h"
-#include "vmlinux_net.h"
+#include "bpf_skbuff.h"
 #include "abi/dropwatch_types.h"
 
 #define TYPE_TCP_COMMON_DROP 1
@@ -210,7 +210,7 @@ int bpf_kfree_skb_prog(struct trace_event_raw_kfree_skb *ctx)
 	}
 	data->meta.memcg_css_addr = skb_memcg_css_addr(skb);
 
-	/* net cookie and net namespace inode from device or socket */
+	/* net cookie and net namespace inum from device or socket */
 	data->meta.net_cookie = skb_netns_cookie(skb);
 	data->meta.net_inum = skb_netns_inum(skb);
 

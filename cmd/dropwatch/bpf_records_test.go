@@ -34,7 +34,7 @@ func TestDropwatchPacketEventParse(t *testing.T) {
 		wantNetdevFlags         uint32 = 0x1003
 		wantNetdevQueueMapping  uint32 = 17
 		wantDropReason          uint32 = 6
-		wantNetInode            uint32 = 0xf000_0000
+		wantNetInum             uint32 = 0xf000_0000
 		wantNetdevName                 = "eth0"
 		wantComm                       = "nginx-worker"
 		wantEthProto            uint16 = 0x0800
@@ -56,7 +56,7 @@ func TestDropwatchPacketEventParse(t *testing.T) {
 	native.PutUint32(buf[44:], wantNetdevFlags)         // dev_flags
 	native.PutUint32(buf[48:], wantNetdevQueueMapping)  // queue_mapping
 	native.PutUint32(buf[52:], wantDropReason)          // drop_reason
-	native.PutUint32(buf[56:], wantNetInode)            // net_inum
+	native.PutUint32(buf[56:], wantNetInum)             // net_inum
 	copy(buf[60:], wantNetdevName)                      // dev_name[16]
 	copy(buf[76:], wantComm)                            // comm[16]
 	// buf[92:96] is the C tail padding, zero.
@@ -75,8 +75,8 @@ func TestDropwatchPacketEventParse(t *testing.T) {
 	if meta.DropReason != wantDropReason {
 		t.Errorf("DropReason = %d, want %d", meta.DropReason, wantDropReason)
 	}
-	if meta.NetInum != wantNetInode {
-		t.Errorf("NetInum = %d, want %d", meta.NetInum, wantNetInode)
+	if meta.NetInum != wantNetInum {
+		t.Errorf("NetInum = %d, want %d", meta.NetInum, wantNetInum)
 	}
 	if got := bytesutil.ToStr(meta.DevName[:]); got != wantNetdevName {
 		t.Errorf("DevName = %q, want %q", got, wantNetdevName)

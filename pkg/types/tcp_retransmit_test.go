@@ -27,22 +27,22 @@ func TestTCPRetransTracingRoundTrip(t *testing.T) {
 		ev   *TCPRetransTracing
 	}{
 		{
-			name: "full_event",
+			name: "full event",
 			ev: &TCPRetransTracing{
 				ObservedTimestamp:  "2026-07-08T09:19:52.042035335Z",
 				TCPReason:          "reorder_prone_fast",
-				Source:             SourceTypesEvent,
+				Source:             "events",
 				Comm:               "kube-apiserver",
 				Pid:                1234,
 				ContainerID:        "abc123",
 				MemcgCssAddr:       0x1000,
 				NetNamespaceCookie: 0x2000,
-				NetNamespaceInode:  4026531992,
-				Saddr:              "10.0.0.1",
-				Daddr:              "10.0.0.2",
-				Sport:              6443,
-				Dport:              58244,
-				State:              "ESTABLISHED",
+				NetNamespaceInum:   4026531992,
+				TCPSaddr:           "10.0.0.1",
+				TCPDaddr:           "10.0.0.2",
+				TCPSport:           6443,
+				TCPDport:           58244,
+				TCPState:           "ESTABLISHED",
 				Phase:              "data",
 				EventType:          "tcp_retransmit_skb",
 				CaState:            3,
@@ -51,7 +51,7 @@ func TestTCPRetransTracingRoundTrip(t *testing.T) {
 				ReordSeen:          10,
 				DsackDups:          2,
 				TCPSeq:             123456,
-				TCPAck:             789012,
+				TCPAckSeq:          789012,
 				TCPEndSeq:          123999,
 				TCPFlags:           "ACK|FIN",
 				SkbAddr:            "0xffff888012345678",
@@ -59,29 +59,29 @@ func TestTCPRetransTracingRoundTrip(t *testing.T) {
 			},
 		},
 		{
-			name: "minimal_event",
+			name: "minimal event",
 			ev: &TCPRetransTracing{
 				ObservedTimestamp: "2026-07-08T00:00:00Z",
 				TCPReason:         "RTO",
-				Saddr:             "::",
-				Daddr:             "::",
-				Sport:             80,
-				Dport:             443,
-				State:             "ESTABLISHED",
+				TCPSaddr:          "::",
+				TCPDaddr:          "::",
+				TCPSport:          80,
+				TCPDport:          443,
+				TCPState:          "ESTABLISHED",
 				Phase:             "data",
 				EventType:         "tcp_retransmit_skb",
 			},
 		},
 		{
-			name: "synack_zero_seq",
+			name: "synack zero sequence",
 			ev: &TCPRetransTracing{
 				ObservedTimestamp: "2026-07-08T00:00:00Z",
 				TCPReason:         "RTO",
-				Saddr:             "10.0.0.1",
-				Daddr:             "10.0.0.2",
-				Sport:             6443,
-				Dport:             50000,
-				State:             "NEW_SYN_RECV",
+				TCPSaddr:          "10.0.0.1",
+				TCPDaddr:          "10.0.0.2",
+				TCPSport:          6443,
+				TCPDport:          50000,
+				TCPState:          "NEW_SYN_RECV",
 				Phase:             "connect",
 				EventType:         "tcp_retransmit_synack",
 			},
@@ -91,15 +91,15 @@ func TestTCPRetransTracingRoundTrip(t *testing.T) {
 			ev: &TCPRetransTracing{
 				ObservedTimestamp: "2026-07-08T00:00:00Z",
 				TCPReason:         "TLP",
-				Saddr:             "10.0.0.1",
-				Daddr:             "10.0.0.2",
-				Sport:             6443,
-				Dport:             50000,
-				State:             "ESTABLISHED",
+				TCPSaddr:          "10.0.0.1",
+				TCPDaddr:          "10.0.0.2",
+				TCPSport:          6443,
+				TCPDport:          50000,
+				TCPState:          "ESTABLISHED",
 				Phase:             "data",
 				EventType:         "tcp_send_loss_probe",
 				TCPSeq:            123,
-				TCPAck:            100,
+				TCPAckSeq:         100,
 			},
 		},
 	}
@@ -127,11 +127,11 @@ func TestTCPRetransTracingOmitEmpty(t *testing.T) {
 	ev := &TCPRetransTracing{
 		ObservedTimestamp: "2026-07-08T00:00:00Z",
 		TCPReason:         "RTO",
-		Saddr:             "10.0.0.1",
-		Daddr:             "10.0.0.2",
-		Sport:             80,
-		Dport:             443,
-		State:             "ESTABLISHED",
+		TCPSaddr:          "10.0.0.1",
+		TCPDaddr:          "10.0.0.2",
+		TCPSport:          80,
+		TCPDport:          443,
+		TCPState:          "ESTABLISHED",
 		Phase:             "data",
 		EventType:         "tcp_retransmit_skb",
 	}
@@ -155,9 +155,28 @@ func TestTCPRetransTracingOmitEmpty(t *testing.T) {
 	if _, ok := raw["family"]; ok {
 		t.Error("family field should be absent")
 	}
+	wantFields := map[string]any{
+		"tcp_state":   "ESTABLISHED",
+		"tcp_saddr":   "10.0.0.1",
+		"tcp_daddr":   "10.0.0.2",
+		"tcp_sport":   float64(80),
+		"tcp_dport":   float64(443),
+		"tcp_seq":     float64(0),
+		"tcp_ack_seq": float64(0),
+	}
+	for field, want := range wantFields {
+		if got := raw[field]; got != want {
+			t.Errorf("%s = %v, want %v", field, got, want)
+		}
+	}
+	for _, field := range []string{"saddr", "daddr", "sport", "dport", "tcp_ack"} {
+		if _, ok := raw[field]; ok {
+			t.Errorf("legacy field %q should be absent", field)
+		}
+	}
 
 	omitFields := []string{
-		"container_id", "memcg_css", "net_namespace_cookie", "net_namespace_inode",
+		"container_id", "memcg_css", "net_namespace_cookie", "net_namespace_inum",
 		"reord_seen", "dsack_dups", "tcp_end_seq", "tcp_flags",
 		"skb_addr", "drop_location", "source",
 	}

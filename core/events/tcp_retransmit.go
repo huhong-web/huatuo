@@ -24,8 +24,8 @@ import (
 
 	internalconfig "huatuo-bamai/internal/config"
 	"huatuo-bamai/internal/pod"
-	executil "huatuo-bamai/internal/profiler/exec"
 	"huatuo-bamai/internal/toolstream"
+	"huatuo-bamai/internal/utils/executil"
 	"huatuo-bamai/pkg/tracing"
 	"huatuo-bamai/pkg/types"
 )
@@ -55,14 +55,15 @@ func newTCPRetransmit() (*tracing.EventTracingAttr, error) {
 // Start launches tcpshark in retransmit mode and waits for it to finish.
 // Events are received via the default toolstream server registered in init.
 func (c *tcpRetransmitTracing) Start(ctx context.Context) error {
-	globalDropCache.enable()
-	defer globalDropCache.disable()
+	globalDropwatchRetransCache.enable()
+	defer globalDropwatchRetransCache.disable()
 
 	args := []string{
 		"--mode", "retransmit",
 		"--bpf-path", path.Join(internalconfig.CoreBpfDir, "tcp_retransmit.o"),
 		"--output-storage", toolstream.DefaultSockPath,
 		"--max-events-per-second", strconv.FormatUint(cfg.TCPRetransmit.MaxEventsPerSecond, 10),
+		"--source-types", toolstream.SourceTypesEvent,
 	}
 
 	if cfg.TCPRetransmit.Filter != "" {
@@ -84,15 +85,15 @@ func (c *tcpRetransmitTracing) Start(ctx context.Context) error {
 
 func handleTCPRetransEvent(_ *toolstream.Session, ev *types.TCPRetransTracing) error {
 	if ev.ContainerID == "" {
-		ev.ContainerID = pod.ResolveContainerIDFromMeta(pod.ContainerMeta{
+		ev.ContainerID = pod.ContainerIDByCgroupNetNS(pod.ContainerCgroupNetNS{
 			MemoryCgroupCSSAddr: ev.MemcgCssAddr,
 			NetNamespaceCookie:  ev.NetNamespaceCookie,
-			NetNamespaceInode:   uint64(ev.NetNamespaceInode),
+			NetNamespaceInum:    uint64(ev.NetNamespaceInum),
 		})
 	}
 
 	if ev.DropLocation == "" {
-		causal, _ := globalDropCache.correlate(ev)
+		causal, _ := globalDropwatchRetransCache.correlate(ev)
 		ev.DropLocation = causalToDropLocation(causal)
 	}
 

@@ -14,32 +14,8 @@
 
 package main
 
-import (
-	"fmt"
-	"os"
-	"time"
-
-	"huatuo-bamai/internal/bpf"
-	"huatuo-bamai/internal/pcapfilter"
+const (
+	retransEventSKU    = 1
+	retransEventSynack = 2
+	retransEventTLP    = 3
 )
-
-var eventRateLimiter = bpf.NewRateLimiter("tcp_retransmit")
-
-func loadTCPRetransBPFWithFilter(
-	bpfPath string,
-	filterExpr string,
-	maxEventsPerSecond uint64,
-) (bpf.BPF, error) {
-	bpfBytes, err := os.ReadFile(bpfPath)
-	if err != nil {
-		return nil, fmt.Errorf("read bpf object: %w", err)
-	}
-
-	bpfName := fmt.Sprintf("tcp_retransmit_%d.o", time.Now().UnixNano())
-	return pcapfilter.Load(
-		bpfName,
-		bpfBytes,
-		filterExpr,
-		eventRateLimiter.ApplyConstants(nil, maxEventsPerSecond),
-	)
-}

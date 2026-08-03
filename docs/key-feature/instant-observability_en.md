@@ -135,48 +135,57 @@ All event records include the following common fields:
 ```json
 {
     "tracer_data": {
-        "type": "common_drop",
+        "observed_timestamp": "2026-07-23T02:14:40.304775546Z",
+        "drop_reason": "SKB_DROP_REASON_NOT_SPECIFIED",
+        "source": "events",
         "comm": "kubelet",
         "pid": 1687046,
-        "saddr": "10.79.68.62",
-        "daddr": "10.134.72.4",
-        "sport": 8080,
-        "dport": 49000,
-        "src_hostname": "<nil>",
-        "dest_hostname": "<nil>",
-        "max_ack_backlog": 128,
-        "seq": 1009085774,
-        "ack_seq": 689410995,
-        "pkt_len": 1460,
-        "sk_state": "ESTABLISHED",
-        "stack": "kfree_skb/...",
+        "net_namespace_cookie": 123456789,
+        "net_namespace_inum": 402653184,
         "netdev_queue_mapping": 3,
         "netdev_linkstatus": ["linkStatusUp"],
         "netdev_name": "eth0",
         "netdev_ifindex": 2,
-        "net_cookie": 123456789
+        "packet_eth_proto": "0x0800",
+        "packet_len": 1460,
+        "layers": {
+            "label": "IPv4/TCP",
+            "ipv4": {
+                "saddr": "10.79.68.62",
+                "daddr": "10.134.72.4",
+                "protocol": "TCP"
+            },
+            "tcp": {
+                "sport": 8080,
+                "dport": 49000,
+                "seq": 1009085774,
+                "ack_seq": 689410995,
+                "flags": "ACK",
+                "sk_state": "ESTABLISHED"
+            }
+        },
+        "stack": "kfree_skb/..."
     }
 }
 ```
 
 **Fields**
 
-- **type**: Drop type (`common_drop` / `syn_flood` / `listen_overflow_handshake1` / `listen_overflow_handshake3`)
+- **drop_reason**: Kernel packet-drop reason
+- **source**: Event source (`tools` for standalone dropwatch or `events` when launched by huatuo-bamai)
 - **comm**: Name of the process that triggered the packet drop
 - **pid**: Process ID
-- **saddr / daddr**: Source IP / Destination IP address
-- **sport / dport**: Source port / Destination port
-- **src_hostname / dest_hostname**: Reverse DNS lookup result for source/destination IP
-- **max_ack_backlog**: Maximum accept queue length of the socket
-- **seq / ack_seq**: TCP sequence number / Acknowledgment sequence number
-- **pkt_len**: Packet length (bytes)
-- **sk_state**: TCP connection state at the time of the drop
-- **stack**: Kernel call stack at the time of the drop
+- **net_namespace_cookie / net_namespace_inum**: Network namespace values used for container resolution
 - **netdev_queue_mapping**: NIC queue index
 - **netdev_linkstatus**: List of NIC link status flags
 - **netdev_name**: Network device name
 - **netdev_ifindex**: Network interface index
-- **net_cookie**: Network namespace identifier
+- **packet_len**: Packet length (bytes)
+- **layers.ipv4.saddr / layers.ipv4.daddr**: Source and destination IP addresses
+- **layers.tcp.sport / layers.tcp.dport**: Source and destination ports
+- **layers.tcp.seq / layers.tcp.ack_seq**: TCP sequence and acknowledgment sequence numbers
+- **layers.tcp.sk_state**: TCP connection state at the time of the drop
+- **stack**: Kernel call stack at the time of the drop
 
 ### 3. net_rx_latency
 
@@ -201,7 +210,7 @@ All event records include the following common fields:
         "tcp_seq": 1009085774,
         "tcp_ack_seq": 689410995,
         "net_namespace_cookie": 123456789,
-        "net_namespace_inode": 402653184,
+        "net_namespace_inum": 402653184,
         "pkt_len": 26064
     }
 }
@@ -218,7 +227,7 @@ All event records include the following common fields:
 - **tcp_sport / tcp_dport**: Source port / Destination port
 - **tcp_seq / tcp_ack_seq**: TCP sequence number / Acknowledgment sequence number
 - **net_namespace_cookie**: Network namespace cookie (available on kernel ≥ 5.14, used for efficient container association)
-- **net_namespace_inode**: Network namespace inode
+- **net_namespace_inum**: Network namespace inum
 - **pkt_len**: Packet length (bytes)
 
 ### 4. oom

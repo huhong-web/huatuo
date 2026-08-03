@@ -24,6 +24,8 @@ import (
 
 	"golang.org/x/sys/unix"
 
+	"huatuo-bamai/internal/bpf/abi"
+	"huatuo-bamai/internal/toolstream"
 	"huatuo-bamai/pkg/types"
 )
 
@@ -57,7 +59,7 @@ func TestFormatEventSkbAddr(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			event := formatEvent(&retransEvent{SkbAddr: tt.skbAddr})
+			event := formatEvent(&abi.RetransmitEvent{SKBAddr: tt.skbAddr})
 			if event.SkbAddr != tt.want {
 				t.Fatalf("SkbAddr = %q, want %q", event.SkbAddr, tt.want)
 			}
@@ -87,12 +89,12 @@ func TestFormatEventTCPFlags(t *testing.T) {
 
 	tests := []struct {
 		name string
-		ev   *retransEvent
+		ev   *abi.RetransmitEvent
 		want string
 	}{
 		{
 			name: "skb flags",
-			ev: &retransEvent{
+			ev: &abi.RetransmitEvent{
 				EventType: retransEventSKU,
 				TCPFlags:  0x18,
 			},
@@ -100,7 +102,7 @@ func TestFormatEventTCPFlags(t *testing.T) {
 		},
 		{
 			name: "synack flags derived from event type",
-			ev: &retransEvent{
+			ev: &abi.RetransmitEvent{
 				EventType: retransEventSynack,
 			},
 			want: "SYN|ACK",
@@ -134,7 +136,7 @@ func TestFormatEventTCPFlags(t *testing.T) {
 func TestFormatEventTLP(t *testing.T) {
 	t.Parallel()
 
-	event := formatEvent(&retransEvent{
+	event := formatEvent(&abi.RetransmitEvent{
 		EventType: retransEventTLP,
 		TCPSeq:    123,
 		TCPAck:    100,
@@ -149,8 +151,8 @@ func TestFormatEventTLP(t *testing.T) {
 	if event.TCPReason != "TLP" {
 		t.Errorf("TCPReason = %q, want TLP", event.TCPReason)
 	}
-	if event.TCPSeq != 123 || event.TCPAck != 100 {
-		t.Errorf("sequence fields = (%d, %d), want (123, 100)", event.TCPSeq, event.TCPAck)
+	if event.TCPSeq != 123 || event.TCPAckSeq != 100 {
+		t.Errorf("sequence fields = (%d, %d), want (123, 100)", event.TCPSeq, event.TCPAckSeq)
 	}
 }
 
@@ -162,13 +164,13 @@ func TestFormatEventAddresses(t *testing.T) {
 
 	tests := []struct {
 		name      string
-		ev        *retransEvent
+		ev        *abi.RetransmitEvent
 		wantSaddr string
 		wantDaddr string
 	}{
 		{
 			name: "ipv4 uses first four bytes",
-			ev: &retransEvent{
+			ev: &abi.RetransmitEvent{
 				Family: unix.AF_INET,
 				Saddr:  [16]byte{127, 0, 0, 1, 0xff},
 				Daddr:  [16]byte{10, 0, 0, 1, 0xff},
@@ -178,7 +180,7 @@ func TestFormatEventAddresses(t *testing.T) {
 		},
 		{
 			name: "ipv6 uses full sixteen bytes",
-			ev: &retransEvent{
+			ev: &abi.RetransmitEvent{
 				Family: unix.AF_INET6,
 			},
 			wantSaddr: "2001:db8::1",
@@ -194,11 +196,11 @@ func TestFormatEventAddresses(t *testing.T) {
 			t.Parallel()
 
 			event := formatEvent(tt.ev)
-			if event.Saddr != tt.wantSaddr {
-				t.Fatalf("Saddr = %q, want %q", event.Saddr, tt.wantSaddr)
+			if event.TCPSaddr != tt.wantSaddr {
+				t.Fatalf("TCPSaddr = %q, want %q", event.TCPSaddr, tt.wantSaddr)
 			}
-			if event.Daddr != tt.wantDaddr {
-				t.Fatalf("Daddr = %q, want %q", event.Daddr, tt.wantDaddr)
+			if event.TCPDaddr != tt.wantDaddr {
+				t.Fatalf("TCPDaddr = %q, want %q", event.TCPDaddr, tt.wantDaddr)
 			}
 		})
 	}
@@ -261,18 +263,18 @@ func TestTextWriterFormatsAllEventFields(t *testing.T) {
 			ev: &types.TCPRetransTracing{
 				ObservedTimestamp:  "2026-07-23T02:14:40.304775546Z",
 				TCPReason:          "RTO",
-				Source:             types.SourceTypesTool,
+				Source:             toolstream.SourceTypesTool,
 				Comm:               "worker thread",
 				Pid:                1420,
 				ContainerID:        "container-1",
 				MemcgCssAddr:       1,
 				NetNamespaceCookie: 2,
-				NetNamespaceInode:  4026531992,
-				Saddr:              "127.0.0.1",
-				Daddr:              "127.0.0.1",
-				Sport:              19996,
-				Dport:              42128,
-				State:              "ESTABLISHED",
+				NetNamespaceInum:   4026531992,
+				TCPState:           "ESTABLISHED",
+				TCPSaddr:           "127.0.0.1",
+				TCPDaddr:           "127.0.0.1",
+				TCPSport:           19996,
+				TCPDport:           42128,
 				Phase:              "data",
 				EventType:          "tcp_retransmit_skb",
 				CaState:            4,
@@ -281,7 +283,7 @@ func TestTextWriterFormatsAllEventFields(t *testing.T) {
 				ReordSeen:          2,
 				DsackDups:          3,
 				TCPSeq:             3154974646,
-				TCPAck:             948393597,
+				TCPAckSeq:          948393597,
 				TCPEndSeq:          3154991030,
 				TCPFlags:           "ACK|PSH",
 				SkbAddr:            "0xffff931c14fdf800",
@@ -294,7 +296,7 @@ func TestTextWriterFormatsAllEventFields(t *testing.T) {
 				"ack=948393597 flags=ACK|PSH pid=1420 comm=worker thread " +
 				"ca=4 retrans=4 icsk_pending=1 reord_seen=2 dsack_dups=3 " +
 				"container_id=container-1 memcg_css=1 net_namespace_cookie=2 " +
-				"net_namespace_inode=4026531992 drop_location=host_software " +
+				"net_namespace_inum=4026531992 drop_location=host_software " +
 				"source=tools\n",
 		},
 		{
@@ -302,11 +304,11 @@ func TestTextWriterFormatsAllEventFields(t *testing.T) {
 			ev: &types.TCPRetransTracing{
 				ObservedTimestamp: "2026-07-23T02:14:40Z",
 				TCPReason:         "RTO",
-				Saddr:             "127.0.0.1",
-				Daddr:             "127.0.0.1",
-				Sport:             19996,
-				Dport:             42128,
-				State:             "ESTABLISHED",
+				TCPState:          "ESTABLISHED",
+				TCPSaddr:          "127.0.0.1",
+				TCPDaddr:          "127.0.0.1",
+				TCPSport:          19996,
+				TCPDport:          42128,
 				Phase:             "data",
 				EventType:         "tcp_retransmit_skb",
 			},

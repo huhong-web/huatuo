@@ -17,6 +17,7 @@ package main
 import (
 	"golang.org/x/sys/unix"
 
+	"huatuo-bamai/internal/bpf/abi"
 	"huatuo-bamai/pkg/types"
 )
 
@@ -28,7 +29,7 @@ const (
 	tcpCALoss
 )
 
-func classifyEvent(ev *retransEvent, tcpFlags string) (types.RetransPhase, types.RetransReason) {
+func classifyEvent(ev *abi.RetransmitEvent, tcpFlags string) (types.RetransPhase, types.RetransReason) {
 	switch ev.EventType {
 	case retransEventSynack:
 		return types.RetransPhaseConnect, types.RetransReasonRTO

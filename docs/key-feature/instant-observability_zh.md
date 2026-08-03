@@ -135,48 +135,57 @@ HUATUO 基于 eBPF 技术，对 Linux 内核中的 CPU 调度、内存子系统�
 ```json
 {
     "tracer_data": {
-        "type": "common_drop",
+        "observed_timestamp": "2026-07-23T02:14:40.304775546Z",
+        "drop_reason": "SKB_DROP_REASON_NOT_SPECIFIED",
+        "source": "events",
         "comm": "kubelet",
         "pid": 1687046,
-        "saddr": "10.79.68.62",
-        "daddr": "10.134.72.4",
-        "sport": 8080,
-        "dport": 49000,
-        "src_hostname": "<nil>",
-        "dest_hostname": "<nil>",
-        "max_ack_backlog": 128,
-        "seq": 1009085774,
-        "ack_seq": 689410995,
-        "pkt_len": 1460,
-        "sk_state": "ESTABLISHED",
-        "stack": "kfree_skb/...",
+        "net_namespace_cookie": 123456789,
+        "net_namespace_inum": 402653184,
         "netdev_queue_mapping": 3,
         "netdev_linkstatus": ["linkStatusUp"],
         "netdev_name": "eth0",
         "netdev_ifindex": 2,
-        "net_cookie": 123456789
+        "packet_eth_proto": "0x0800",
+        "packet_len": 1460,
+        "layers": {
+            "label": "IPv4/TCP",
+            "ipv4": {
+                "saddr": "10.79.68.62",
+                "daddr": "10.134.72.4",
+                "protocol": "TCP"
+            },
+            "tcp": {
+                "sport": 8080,
+                "dport": 49000,
+                "seq": 1009085774,
+                "ack_seq": 689410995,
+                "flags": "ACK",
+                "sk_state": "ESTABLISHED"
+            }
+        },
+        "stack": "kfree_skb/..."
     }
 }
 ```
 
 **字段含义解释**
 
-- **type**：丢包类型（`common_drop` / `syn_flood` / `listen_overflow_handshake1` / `listen_overflow_handshake3`）
+- **drop_reason**：内核数据包丢弃原因
+- **source**：事件来源（独立运行 dropwatch 时为 `tools`，由 huatuo-bamai 启动时为 `events`）
 - **comm**：触发丢包的进程名称
 - **pid**：进程 ID
-- **saddr / daddr**：源 IP / 目的 IP 地址
-- **sport / dport**：源端口 / 目的端口
-- **src_hostname / dest_hostname**：源/目的 IP 的反向 DNS 解析结果
-- **max_ack_backlog**：socket 最大 accept 队列长度
-- **seq / ack_seq**：TCP 序列号 / 确认序列号
-- **pkt_len**：数据包长度（字节）
-- **sk_state**：丢包时 TCP 连接状态
-- **stack**：丢包发生时的内核调用栈
+- **net_namespace_cookie / net_namespace_inum**：用于容器归属解析的网络命名空间值
 - **netdev_queue_mapping**：网卡队列索引
 - **netdev_linkstatus**：网卡链路状态标志列表
 - **netdev_name**：网卡设备名称
 - **netdev_ifindex**：网卡接口索引
-- **net_cookie**：网络命名空间标识符
+- **packet_len**：数据包长度（字节）
+- **layers.ipv4.saddr / layers.ipv4.daddr**：源 IP 和目的 IP 地址
+- **layers.tcp.sport / layers.tcp.dport**：源端口和目的端口
+- **layers.tcp.seq / layers.tcp.ack_seq**：TCP 序列号和确认序列号
+- **layers.tcp.sk_state**：丢包时 TCP 连接状态
+- **stack**：丢包发生时的内核调用栈
 
 ### 3. net_rx_latency 协议栈延迟
 
@@ -201,7 +210,7 @@ HUATUO 基于 eBPF 技术，对 Linux 内核中的 CPU 调度、内存子系统�
         "tcp_seq": 1009085774,
         "tcp_ack_seq": 689410995,
         "net_namespace_cookie": 123456789,
-        "net_namespace_inode": 402653184,
+        "net_namespace_inum": 402653184,
         "pkt_len": 26064
     }
 }
@@ -218,7 +227,7 @@ HUATUO 基于 eBPF 技术，对 Linux 内核中的 CPU 调度、内存子系统�
 - **tcp_sport / tcp_dport**：源端口 / 目的端口
 - **tcp_seq / tcp_ack_seq**：TCP 序列号 / 确认序列号
 - **net_namespace_cookie**：网络命名空间 cookie（内核 ≥ 5.14 可用，用于高效容器关联）
-- **net_namespace_inode**：网络命名空间 inode
+- **net_namespace_inum**：网络命名空间 inum
 - **pkt_len**：数据包长度（字节）
 
 ### 4. oom 内存耗尽

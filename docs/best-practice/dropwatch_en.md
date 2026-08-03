@@ -213,13 +213,13 @@ Each drop event is represented as an NDJSON object (`types.DropWatchTracing`).
 | `observed_timestamp`     | string   | UTC timestamp when the event was captured (RFC3339Nano)       |
 | `type`                   | string   | Event type reserved field; currently empty string             |
 | `drop_reason`            | string   | Drop reason reserved field; currently empty string            |
-| `source`                 | string   | Event source; when present, indicates `events` or `tools` (omitempty) |
+| `source`                 | string   | Event source; `tools` for standalone dropwatch and `events` when launched by huatuo-bamai |
 | `comm`                   | string   | Process name at the time of the drop                          |
 | `pid`                    | uint64   | Process TGID                                                  |
 | `container_id`           | string   | Container ID (populated by huatuo-bamai resolution, omitempty) |
 | `memory_cgroup_css_addr` | string   | Memory cgroup CSS address, used for container resolution       |
 | `net_namespace_cookie`   | uint64   | Network namespace cookie, used for container resolution        |
-| `net_namespace_inode`    | uint32   | Network namespace inode, used for container resolution         |
+| `net_namespace_inum`    | uint32   | Network namespace inum, used for container resolution          |
 | `netdev_name`            | string   | Network device name (e.g. `eth0`)                             |
 | `netdev_ifindex`         | uint32   | Network interface index                                       |
 | `netdev_queue_mapping`   | uint32   | TX queue mapping                                              |
@@ -235,10 +235,10 @@ Each drop event is represented as an NDJSON object (`types.DropWatchTracing`).
 | Field          | Description                                                                                              |
 | -------------- | -------------------------------------------------------------------------------------------------------- |
 | `layers.label` | Protocol combination label, e.g. `IPv4/TCP`, `IPv6/UDP`, `ARP`, `unknown`                                |
-| `layers.ether` | L2 fields: `src`, `dst`, `type`, `len` (present only for 802.3 frames)                                   |
-| `layers.ipv4`  | IPv4 fields: `version`, `ihl`, `tos`, `len`, `id`, `flags`, `frag_offset`, `ttl`, `protocol`, `checksum`, `src`, `dst` |
-| `layers.ipv6`  | IPv6 fields: `version`, `traffic_class`, `flow_label`, `len`, `next_header`, `hop_limit`, `src`, `dst`  |
-| `layers.tcp`   | TCP fields: `sport`, `dport`, `seq`, `ack`, `data_offset`, `flags`, `window`, `checksum`, `urgent`, `sk_state` |
+| `layers.ether` | L2 fields: `saddr`, `daddr`, `type`, `len` (present only for 802.3 frames)                                   |
+| `layers.ipv4`  | IPv4 fields: `version`, `ihl`, `tos`, `len`, `id`, `flags`, `frag_offset`, `ttl`, `protocol`, `checksum`, `saddr`, `daddr` |
+| `layers.ipv6`  | IPv6 fields: `version`, `traffic_class`, `flow_label`, `len`, `next_header`, `hop_limit`, `saddr`, `daddr`  |
+| `layers.tcp`   | TCP fields: `sport`, `dport`, `seq`, `ack_seq`, `data_offset`, `flags`, `window`, `checksum`, `urgent`, `sk_state` |
 | `layers.udp`   | UDP fields: `sport`, `dport`, `len`, `checksum`                                                         |
 | `layers.icmp`  | ICMP/ICMPv6 fields: `type`, `code`, `checksum`, `id`, `seq`                                             |
 | `layers.arp`   | ARP fields: `addr_type`, `protocol`, `hw_address_size`, `prot_address_size`, `operation`, `sender_mac`, `sender_ip`, `target_mac`, `target_ip` |

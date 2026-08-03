@@ -48,7 +48,7 @@ type NetTracingData struct {
 	LatMs              float64 `json:"lat_ms"`
 	LatThresholds      uint64  `json:"lat_thresholds"`
 	NetdevName         string  `json:"netdev_name"`
-	NetNamespaceInode  uint32  `json:"net_namespace_inode"`
+	NetNamespaceInum   uint32  `json:"net_namespace_inum"`
 	NetNamespaceCookie uint64  `json:"net_namespace_cookie"`
 	TCPState           string  `json:"tcp_state"`
 	TCPSaddr           string  `json:"tcp_saddr"`
@@ -131,9 +131,9 @@ func (c *netRecvLatTracing) Start(ctx context.Context) error {
 	b.WaitDetachByBreaker(childCtx, cancel)
 
 	// save host netns
-	hostNetNsInode, err := netutil.NetNSInodeByPid(1)
+	hostNetNSInum, err := netutil.NetNSInumByPid(1)
 	if err != nil {
-		return fmt.Errorf("get host netns inode: %w", err)
+		return fmt.Errorf("get host netns inum: %w", err)
 	}
 
 	for {
@@ -146,7 +146,7 @@ func (c *netRecvLatTracing) Start(ctx context.Context) error {
 				return fmt.Errorf("read from perf event fail: %w", err)
 			}
 
-			containerID, ok := filterByConfigAndResolveContainerID(&pd, hostNetNsInode)
+			containerID, ok := filterByConfigAndResolveContainerID(&pd, hostNetNSInum)
 			if !ok {
 				continue
 			}
@@ -180,7 +180,7 @@ func (c *netRecvLatTracing) Start(ctx context.Context) error {
 				LatMs:              lat,
 				LatThresholds:      latThreshold,
 				NetdevName:         bytesutil.ToStr(pd.NetdevName[:]),
-				NetNamespaceInode:  pd.NetnsInum,
+				NetNamespaceInum:   pd.NetInum,
 				NetNamespaceCookie: pd.NetCookie,
 				TCPState:           state,
 				TCPSaddr:           saddr,
@@ -215,10 +215,10 @@ func isQosExcluded(container *pod.Container) bool {
 	return false
 }
 
-func filterByConfigAndResolveContainerID(pd *abi.NetRXLatencyEvent, hostNetnsInode uint64) (string, bool) {
-	inode := uint64(pd.NetnsInum)
+func filterByConfigAndResolveContainerID(pd *abi.NetRXLatencyEvent, hostNetNSInum uint64) (string, bool) {
+	inum := uint64(pd.NetInum)
 
-	if cfg.NetRxLatency.ExcludedHostNetnamespace && inode == hostNetnsInode {
+	if cfg.NetRxLatency.ExcludedHostNetnamespace && inum == hostNetNSInum {
 		return "", false
 	}
 
@@ -234,9 +234,9 @@ func filterByConfigAndResolveContainerID(pd *abi.NetRXLatencyEvent, hostNetnsIno
 	}
 
 	if container == nil {
-		ct, err := pod.ContainerByNetInode(inode)
+		ct, err := pod.ContainerByNetInum(inum)
 		if err != nil {
-			log.Warnf("net_rx_latency: get container by netns inode %d failed: %v", inode, err)
+			log.Warnf("net_rx_latency: get container by netns inum %d failed: %v", inum, err)
 			return "", true
 		}
 		if ct == nil {

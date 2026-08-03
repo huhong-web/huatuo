@@ -26,11 +26,11 @@ TEST_PORT=19994
 
 [[ -x "${TCPSHARK_BIN}" ]] || fatal "tcpshark binary not found: ${TCPSHARK_BIN}"
 [[ -f "${BPF_OBJ}" ]] || fatal "BPF object not found: ${BPF_OBJ}"
-require_nc
+require_python3
 
 cleanup() {
 	[[ -n "${TCPSHARK_PID:-}" ]] && kill "${TCPSHARK_PID}" 2> /dev/null || true
-	[[ -n "${NC_PID:-}" ]] && kill "${NC_PID}" 2> /dev/null || true
+	[[ -n "${SRV_PID:-}" ]] && kill "${SRV_PID}" 2> /dev/null || true
 	sleep 0.2
 	[[ -n "${TCPSHARK_PID:-}" ]] && kill -9 "${TCPSHARK_PID}" 2> /dev/null || true
 	iptables -D OUTPUT -p tcp --dport "${TEST_PORT}" --tcp-flags SYN,ACK ACK -j DROP 2> /dev/null || true
@@ -40,9 +40,10 @@ trap cleanup EXIT
 
 log_info "SYNACK retrans: drop client's final ACK so server retransmits SYNACK via inet_rtx_synack"
 
-# 1. nc holds a listening socket; the kernel completes the 3-way handshake.
-timeout 8 $(nc_listen_cmd "127.0.0.1" "${TEST_PORT}") > /dev/null 2>&1 &
-NC_PID=$!
+# 1. Hold a listening socket while the kernel handles the 3-way handshake.
+timeout 8 python3 "${ROOT_DIR}/integration/testdata/tcp_server.py" \
+	--listen-address "127.0.0.1" --port "${TEST_PORT}" > /dev/null 2>&1 &
+SRV_PID=$!
 sleep 0.5
 
 # 2. Drop the client's pure ACK (handshake completion) to the server.

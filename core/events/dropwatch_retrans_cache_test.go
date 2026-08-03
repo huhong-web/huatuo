@@ -44,12 +44,12 @@ func TestCausalToDropLocation(t *testing.T) {
 	}
 }
 
-func TestDropCacheCorrelate(t *testing.T) {
-	cache := newDropCache(2 * time.Second)
+func TestDropwatchRetransCacheCorrelate(t *testing.T) {
+	cache := newDropwatchRetransCache(2 * time.Second)
 	cache.enable()
 
 	key := makeConnKey("10.0.0.1", "10.0.0.2", 1234, 80)
-	cache.entries[key] = []dropCacheEntry{
+	cache.entries[key] = []dropwatchRetransCacheEntry{
 		{
 			ev:       &types.DropWatchTracing{PacketSkbAddr: "0xdeadbeef", Layers: tcpPacketLayers("10.0.0.1", "10.0.0.2", 1234, 80)},
 			expiryAt: time.Now().Add(time.Second),
@@ -63,17 +63,17 @@ func TestDropCacheCorrelate(t *testing.T) {
 	}{
 		{
 			name:       "skb_match",
-			retrans:    &types.TCPRetransTracing{Saddr: "10.0.0.1", Daddr: "10.0.0.2", Sport: 1234, Dport: 80, SkbAddr: "0xdeadbeef"},
+			retrans:    &types.TCPRetransTracing{TCPSaddr: "10.0.0.1", TCPDaddr: "10.0.0.2", TCPSport: 1234, TCPDport: 80, SkbAddr: "0xdeadbeef"},
 			wantCausal: RetransDropDirect,
 		},
 		{
 			name:       "5tuple_match",
-			retrans:    &types.TCPRetransTracing{Saddr: "10.0.0.1", Daddr: "10.0.0.2", Sport: 1234, Dport: 80, SkbAddr: "0xother"},
+			retrans:    &types.TCPRetransTracing{TCPSaddr: "10.0.0.1", TCPDaddr: "10.0.0.2", TCPSport: 1234, TCPDport: 80, SkbAddr: "0xother"},
 			wantCausal: RetransDrop5Tuple,
 		},
 		{
 			name:       "no_match",
-			retrans:    &types.TCPRetransTracing{Saddr: "10.0.0.3", Daddr: "10.0.0.4", Sport: 9999, Dport: 80},
+			retrans:    &types.TCPRetransTracing{TCPSaddr: "10.0.0.3", TCPDaddr: "10.0.0.4", TCPSport: 9999, TCPDport: 80},
 			wantCausal: RetransNoDrop,
 		},
 	}
@@ -88,11 +88,11 @@ func TestDropCacheCorrelate(t *testing.T) {
 	}
 }
 
-func TestDropCacheAddCleansExpired(t *testing.T) {
-	cache := newDropCache(time.Second)
+func TestDropwatchRetransCacheAddCleansExpired(t *testing.T) {
+	cache := newDropwatchRetransCache(time.Second)
 	cache.enable()
 	now := time.Now()
-	cache.entries = map[connKey][]dropCacheEntry{
+	cache.entries = map[connKey][]dropwatchRetransCacheEntry{
 		"expired": {
 			{expiryAt: now.Add(-time.Second)},
 		},
@@ -113,16 +113,16 @@ func TestDropCacheAddCleansExpired(t *testing.T) {
 	}
 }
 
-func TestDropCacheLifecycle(t *testing.T) {
-	cache := newDropCache(time.Second)
+func TestDropwatchRetransCacheLifecycle(t *testing.T) {
+	cache := newDropwatchRetransCache(time.Second)
 	event := &types.DropWatchTracing{
 		Layers: tcpPacketLayers("10.0.0.1", "10.0.0.2", 1234, 80),
 	}
 	retrans := &types.TCPRetransTracing{
-		Saddr: "10.0.0.1",
-		Daddr: "10.0.0.2",
-		Sport: 1234,
-		Dport: 80,
+		TCPSaddr: "10.0.0.1",
+		TCPDaddr: "10.0.0.2",
+		TCPSport: 1234,
+		TCPDport: 80,
 	}
 
 	cache.add(event)
@@ -150,7 +150,7 @@ func TestDropCacheLifecycle(t *testing.T) {
 
 func tcpPacketLayers(saddr, daddr string, sport, dport uint16) *packet.Packet {
 	return &packet.Packet{
-		IPv4: &packet.IPv4{Src: net.ParseIP(saddr), Dst: net.ParseIP(daddr)},
-		TCP:  &packet.TCP{SrcPort: sport, DstPort: dport},
+		IPv4: &packet.IPv4{Saddr: net.ParseIP(saddr), Daddr: net.ParseIP(daddr)},
+		TCP:  &packet.TCP{Sport: sport, Dport: dport},
 	}
 }

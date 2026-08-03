@@ -25,6 +25,7 @@ import (
 	"golang.org/x/sys/unix"
 
 	"huatuo-bamai/internal/bpf"
+	"huatuo-bamai/internal/bpf/abi"
 	"huatuo-bamai/internal/log"
 )
 
@@ -46,6 +47,7 @@ func mainAction(c *cli.Context) error {
 func runRetransmit(c *cli.Context) error {
 	duration := c.Int(cliFlagDuration)
 	outputFmt := c.String(cliFlagOutput)
+	sourceTypes := c.String(cliFlagSourceTypes)
 	maxEventsPerSecond := c.Uint64(cliFlagMaxEventsPerSecond)
 
 	if err := bpf.NewManager(&bpf.Option{KeepaliveTimeout: duration}); err != nil {
@@ -110,7 +112,7 @@ func runRetransmit(c *cli.Context) error {
 		outputFmt: outputFmt,
 		sockPath:  c.String(cliFlagOutputStorage),
 		toolName:  tcpSharkToolName,
-		version:   AppVersion,
+		version:   versionInfo.Version,
 		taskID:    c.String(cliFlagTaskID),
 	})
 	if err != nil {
@@ -123,7 +125,7 @@ func runRetransmit(c *cli.Context) error {
 			return nil
 		}
 
-		var ev retransEvent
+		var ev abi.RetransmitEvent
 		if err := reader.ReadInto(&ev); err != nil {
 			if runCtx.Err() != nil {
 				return nil
@@ -132,7 +134,9 @@ func runRetransmit(c *cli.Context) error {
 			continue
 		}
 
-		if err := sink.Write(formatEvent(&ev)); err != nil {
+		event := formatEvent(&ev)
+		event.Source = sourceTypes
+		if err := sink.Write(event); err != nil {
 			log.Errorf("tcpshark: send retransmit event: %v", err)
 			return nil
 		}

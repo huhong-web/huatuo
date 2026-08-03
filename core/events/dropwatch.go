@@ -20,14 +20,13 @@ import (
 	"fmt"
 	"path"
 	"strconv"
-	"strings"
 	"time"
 
 	internalconfig "huatuo-bamai/internal/config"
 	"huatuo-bamai/internal/matcher"
 	"huatuo-bamai/internal/pod"
-	executil "huatuo-bamai/internal/profiler/exec"
 	"huatuo-bamai/internal/toolstream"
+	"huatuo-bamai/internal/utils/executil"
 	"huatuo-bamai/internal/utils/kernaddr"
 	"huatuo-bamai/pkg/tracing"
 	"huatuo-bamai/pkg/types"
@@ -56,6 +55,7 @@ func (c *dropWatchTracing) Start(ctx context.Context) error {
 		"--output-storage", toolstream.DefaultSockPath,
 		"--filter", cfg.Dropwatch.Filter,
 		"--max-events-per-second", strconv.FormatUint(cfg.Dropwatch.MaxEventsPerSecond, 10),
+		"--source-types", toolstream.SourceTypesEvent,
 	}
 
 	result := executil.ExecCmd(ctx, 0, path.Join(internalconfig.CoreBinDir, "dropwatch"), args...)
@@ -74,17 +74,17 @@ func handleDropwatchEvent(_ *toolstream.Session, ev *types.DropWatchTracing) err
 	}
 
 	if ev.ContainerID == "" {
-		meta := pod.ContainerMeta{
+		ids := pod.ContainerCgroupNetNS{
 			NetNamespaceCookie: ev.NetNamespaceCookie,
-			NetNamespaceInode:  uint64(ev.NetNamespaceInode),
+			NetNamespaceInum:   uint64(ev.NetNamespaceInum),
 		}
 		if addr, ok := kernaddr.Parse(ev.MemoryCgroupCSSAddr); ok {
-			meta.MemoryCgroupCSSAddr = addr
+			ids.MemoryCgroupCSSAddr = addr
 		}
-		ev.ContainerID = pod.ResolveContainerIDFromMeta(meta)
+		ev.ContainerID = pod.ContainerIDByCgroupNetNS(ids)
 	}
 
-	globalDropCache.add(ev)
+	globalDropwatchRetransCache.add(ev)
 
 	return tracing.Save(&tracing.WriteRequest{
 		TracerName:  "dropwatch",
@@ -94,25 +94,8 @@ func handleDropwatchEvent(_ *toolstream.Session, ev *types.DropWatchTracing) err
 	})
 }
 
-// ignoreDropwatch returns true for known-noisy events that should not be forwarded.
-// Stack frame matching uses the same patterns as the previous TCP-only tracer.
+// ignoreDropwatch returns true for configured noisy events that should not be forwarded.
 func ignoreDropwatch(data *types.DropWatchTracing) bool {
-	stack := strings.Split(data.Stack, "\n")
-
-	// state: CLOSE_WAIT
-	// stack:
-	// 1. kfree_skb/ffffffff963047b0
-	// 2. kfree_skb/ffffffff963047b0
-	// 3. skb_rbtree_purge/ffffffff963089e0
-	// 4. tcp_fin/ffffffff963ac200
-	// 5. ...
-	// CLOSE_WAIT + skb_rbtree_purge: normal socket teardown, not a drop.
-	if data.Layers != nil && data.Layers.TCP != nil && data.Layers.TCP.SkState == "CLOSE_WAIT" {
-		if len(stack) >= 3 && strings.HasPrefix(stack[2], "skb_rbtree_purge/") {
-			return true
-		}
-	}
-
 	// Operator-configured stack-frame noise rules (e.g. bnxt_tx_int,
 	// neigh_invalidate). Patterns live in events.IssuesList; see
 	// net_rx_latency.go for the same pattern. Match against data.Stack

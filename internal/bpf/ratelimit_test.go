@@ -19,7 +19,7 @@ import "testing"
 func TestRateLimiterApplyConstants(t *testing.T) {
 	t.Parallel()
 
-	limiter := NewRateLimiter("tcp_retransmit", "tcpshark")
+	limiter := NewRateLimiter("tcp_retransmit")
 
 	t.Run("disabled returns original map", func(t *testing.T) {
 		t.Parallel()

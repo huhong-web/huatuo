@@ -110,8 +110,8 @@ func Parse(pkt *Hdr) (*Packet, error) {
 
 	if pkt.HasEthHdr == 1 && len(dec.eth.SrcMAC) == 6 {
 		out.Ether = &Ether{
-			Src:    dec.eth.SrcMAC.String(),
-			Dst:    dec.eth.DstMAC.String(),
+			Saddr:  dec.eth.SrcMAC.String(),
+			Daddr:  dec.eth.DstMAC.String(),
 			Type:   dec.eth.EthernetType.String(),
 			Length: dec.eth.Length,
 		}
@@ -131,8 +131,8 @@ func Parse(pkt *Hdr) (*Packet, error) {
 				TTL:        dec.ipv4.TTL,
 				Protocol:   dec.ipv4.Protocol.String(),
 				Checksum:   dec.ipv4.Checksum,
-				Src:        slices.Clone(dec.ipv4.SrcIP),
-				Dst:        slices.Clone(dec.ipv4.DstIP),
+				Saddr:      slices.Clone(dec.ipv4.SrcIP),
+				Daddr:      slices.Clone(dec.ipv4.DstIP),
 			}
 		case layers.LayerTypeIPv6:
 			out.IPv6 = &IPv6{
@@ -142,15 +142,15 @@ func Parse(pkt *Hdr) (*Packet, error) {
 				Length:       dec.ipv6.Length,
 				NextHeader:   dec.ipv6.NextHeader.String(),
 				HopLimit:     dec.ipv6.HopLimit,
-				Src:          slices.Clone(dec.ipv6.SrcIP),
-				Dst:          slices.Clone(dec.ipv6.DstIP),
+				Saddr:        slices.Clone(dec.ipv6.SrcIP),
+				Daddr:        slices.Clone(dec.ipv6.DstIP),
 			}
 		case layers.LayerTypeTCP:
 			out.TCP = &TCP{
-				SrcPort:    uint16(dec.tcp.SrcPort),
-				DstPort:    uint16(dec.tcp.DstPort),
+				Sport:      uint16(dec.tcp.SrcPort),
+				Dport:      uint16(dec.tcp.DstPort),
 				Seq:        dec.tcp.Seq,
-				Ack:        dec.tcp.Ack,
+				AckSeq:     dec.tcp.Ack,
 				DataOffset: dec.tcp.DataOffset,
 				Flags:      tcpFlags(&dec.tcp),
 				Window:     dec.tcp.Window,
@@ -160,8 +160,8 @@ func Parse(pkt *Hdr) (*Packet, error) {
 			}
 		case layers.LayerTypeUDP:
 			out.UDP = &UDP{
-				SrcPort:  uint16(dec.udp.SrcPort),
-				DstPort:  uint16(dec.udp.DstPort),
+				Sport:    uint16(dec.udp.SrcPort),
+				Dport:    uint16(dec.udp.DstPort),
 				Length:   dec.udp.Length,
 				Checksum: dec.udp.Checksum,
 			}
@@ -219,11 +219,11 @@ const (
 	tcpFlagCWR uint8 = 0x80
 )
 
-// tcpFlagStrings is a 256-entry lookup table from a raw TCP flag byte to its
+// TCPFlagStrings is a 256-entry lookup table from a raw TCP flag byte to its
 // "SYN|ACK"-style rendering. Building strings via strings.Builder per packet
 // dominated the TCP hot path; precomputing all 2^8 combinations costs ~4 KB
 // of static memory and turns tcpFlags into a zero-allocation indexed read.
-var tcpFlagStrings [256]string
+var TCPFlagStrings [256]string
 
 func init() {
 	names := [...]struct {
@@ -249,13 +249,8 @@ func init() {
 			}
 		}
 
-		tcpFlagStrings[i] = strings.Join(parts, "|")
+		TCPFlagStrings[i] = strings.Join(parts, "|")
 	}
-}
-
-// FormatTCPFlags renders a raw TCP flag byte as "SYN|ACK"-style text.
-func FormatTCPFlags(flags uint8) string {
-	return tcpFlagStrings[flags]
 }
 
 func tcpFlags(tcp *layers.TCP) string {
@@ -293,7 +288,7 @@ func tcpFlags(tcp *layers.TCP) string {
 		b |= tcpFlagCWR
 	}
 
-	return FormatTCPFlags(b)
+	return TCPFlagStrings[b]
 }
 
 var tcpStateNames = []string{

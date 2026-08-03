@@ -34,6 +34,7 @@ func mainAction(c *cli.Context) error {
 
 	duration := c.Int(cliFlagDuration)
 	outputFmt := c.String(cliFlagOutput)
+	sourceTypes := c.String(cliFlagSourceTypes)
 
 	if err := bpf.NewManager(&bpf.Option{KeepaliveTimeout: duration}); err != nil {
 		return fmt.Errorf("dropwatch: init bpf manager: %w", err)
@@ -125,7 +126,9 @@ func mainAction(c *cli.Context) error {
 			continue
 		}
 
-		if err := sink.Write(formatEvent(&ev)); err != nil {
+		event := formatEvent(&ev)
+		event.Source = sourceTypes
+		if err := sink.Write(event); err != nil {
 			log.Errorf("dropwatch: send event: %v", err)
 			return nil
 		}

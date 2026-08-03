@@ -77,9 +77,7 @@ can make an expression easier to read.
 | `arp`, `ether host ...`, and other L2-only expressions | Not useful for TCP retransmission SKBs and may reject all L3 events or produce undefined L3 matches. |
 | `tcp_retransmit_synack` or `tcp_send_loss_probe` | No SKB is available to the BPF program, so `--filter` is not applied. |
 
-For complete syntax and limitations, refer to the `internal/pcapfilter`
-implementation. The event-coverage limitation above is specific to
-tcpshark.
+For complete syntax, limitations, and examples, refer to the [dropwatch documentation](/docs/best-practice/dropwatch_en.md). The event-coverage limitation above is specific to tcpshark.
 
 ### 1.3 Recommended Expressions
 
@@ -176,11 +174,11 @@ Each event is an NDJSON object (`types.TCPRetransTracing`). Fields tagged with
 | `container_id` | string | Container ID when resolved by huatuo-bamai; see §6. |
 | `memcg_css` | uint64 | Socket memory-cgroup CSS address used for container resolution. |
 | `net_namespace_cookie` | uint64 | Socket network-namespace cookie used for container resolution. |
-| `net_namespace_inode` | uint32 | Socket network-namespace inode used for container resolution. |
-| `saddr` | string | Source IP address. |
-| `daddr` | string | Destination IP address. |
-| `sport` | uint16 | Source port. |
-| `dport` | uint16 | Destination port. |
+| `net_namespace_inum` | uint32 | Socket network namespace inum used for container resolution. |
+| `tcp_saddr` | string | Source IP address. |
+| `tcp_daddr` | string | Destination IP address. |
+| `tcp_sport` | uint16 | Source port. |
+| `tcp_dport` | uint16 | Destination port. |
 | `tcp_state` | string | TCP socket state, such as `ESTABLISHED`, `SYN_SENT`, or `NEW_SYN_RECV`. |
 | `phase` | string | Classifier output: `connect`, `data`, or `close`. |
 | `tcp_reason` | string | Classifier output: `RTO`, `fast_retransmit`, `reorder_prone_fast`, `TLP`, or `unknown`. |
@@ -191,12 +189,12 @@ Each event is an NDJSON object (`types.TCPRetransTracing`). Fields tagged with
 | `reord_seen` | uint32 | Cumulative flow reorder counter. |
 | `dsack_dups` | uint32 | Cumulative DSACK duplicate counter. |
 | `tcp_seq` | uint32 | `TCP_SKB_CB(skb)->seq` for SKB events, the retransmitted segment start sequence; zero for SYN-ACK events. |
-| `tcp_ack` | uint32 | `tcp_sk(sk)->rcv_nxt` for SKB events, the ACK sequence that the real retransmitted packet header will carry; zero for SYN-ACK events. |
+| `tcp_ack_seq` | uint32 | `tcp_sk(sk)->rcv_nxt` for SKB events, the ACK sequence that the real retransmitted packet header will carry; zero for SYN-ACK events. |
 | `tcp_end_seq` | uint32 | `TCP_SKB_CB(skb)->end_seq` for SKB events, the retransmitted segment end sequence; omitted for SYN-ACK events. |
 | `tcp_flags` | string | Rendered TCP flag set such as `SYN|ACK` or `ACK|PSH`; SKB events use `TCP_SKB_CB(skb)->tcp_flags`, and SYN-ACK events derive it from the event type. |
 | `skb_addr` | string | Retransmission-queue SKB pointer in hex; absent for SYN-ACK events. |
 | `drop_location` | string | huatuo-bamai correlation heuristic; see §7. |
-| `source` | string | Optional source field; when present, indicates `events` or `tools`. The standalone CLI currently does not set it. |
+| `source` | string | Event source. It is `tools` when tcpshark runs standalone and `events` when huatuo-bamai launches it. |
 
 `icsk_pending` is a timer-state snapshot at the hook, not a stable retransmission-reason enum. TLP classification uses the explicit `event_type=tcp_send_loss_probe` and does not depend on `icsk_pending=5`.
 
@@ -217,17 +215,17 @@ variables as JSON. Variables tagged with `omitempty` appear only when non-zero
 or non-empty, and string values are not JSON-quoted or escaped. For compatibility
 with the original text format, `state`, `skb`, `seq`, `end`, `ack`, `flags`,
 `ca`, and `retrans` correspond to the JSON fields `tcp_state`, `skb_addr`,
-`tcp_seq`, `tcp_end_seq`, `tcp_ack`, `tcp_flags`, `ca_state`, and
+`tcp_seq`, `tcp_end_seq`, `tcp_ack_seq`, `tcp_flags`, `ca_state`, and
 `icsk_retransmits`, respectively.
 
 ```
-<timestamp> [<phase>/<tcp_reason>] <saddr>:<sport> > <daddr>:<dport> state=<STATE> event_type=<TYPE> [SYNACK] [skb=<ADDR>] seq=<N> [end=<N>] ack=<N> [flags=<FLAGS>] pid=<N> comm=<COMM> ca=<N> retrans=<N> icsk_pending=<N> [reord_seen=<N>] [dsack_dups=<N>] [container_id=<ID>] [memcg_css=<N>] [net_namespace_cookie=<N>] [net_namespace_inode=<N>] [drop_location=<LOCATION>] [source=<SOURCE>]
+<timestamp> [<phase>/<tcp_reason>] <saddr>:<sport> > <daddr>:<dport> state=<STATE> event_type=<TYPE> [SYNACK] [skb=<ADDR>] seq=<N> [end=<N>] ack=<N> [flags=<FLAGS>] pid=<N> comm=<COMM> ca=<N> retrans=<N> icsk_pending=<N> [reord_seen=<N>] [dsack_dups=<N>] [container_id=<ID>] [memcg_css=<N>] [net_namespace_cookie=<N>] [net_namespace_inum=<N>] [drop_location=<LOCATION>] [source=<SOURCE>]
 ```
 
 Example:
 
 ```
-2026-07-23T02:14:40.304775546Z [data/RTO] 127.0.0.1:19996 > 127.0.0.1:42128 state=ESTABLISHED event_type=tcp_retransmit_skb skb=0xffff931c14fdf800 seq=3154974646 end=3154991030 ack=948393597 flags=ACK|PSH pid=1420 comm=kube-apiserver ca=4 retrans=4 icsk_pending=0 net_namespace_inode=4026531992
+2026-07-23T02:14:40.304775546Z [data/RTO] 127.0.0.1:19996 > 127.0.0.1:42128 state=ESTABLISHED event_type=tcp_retransmit_skb skb=0xffff931c14fdf800 seq=3154974646 end=3154991030 ack=948393597 flags=ACK|PSH pid=1420 comm=kube-apiserver ca=4 retrans=4 icsk_pending=0 net_namespace_inum=4026531992
 ```
 
 The `pid` and `comm` in this example describe the execution context in which
@@ -382,7 +380,7 @@ by huatuo-bamai:
 | Mode | Behavior |
 |------|----------|
 | Standalone stdout output | `container_id` is normally absent. Socket memcg/netns metadata is still emitted when available. |
-| huatuo-bamai / `--output-storage` | When `container_id` is empty, huatuo-bamai tries `memcg_css`, then `net_namespace_cookie`, then `net_namespace_inode`. |
+| huatuo-bamai / `--output-storage` | When `container_id` is empty, huatuo-bamai tries `memcg_css`, then `net_namespace_cookie`, then `net_namespace_inum`. |
 
 If all lookups miss, `container_id` remains empty and the event is still
 stored. `pid`/`comm` should not be used as a fallback for socket ownership

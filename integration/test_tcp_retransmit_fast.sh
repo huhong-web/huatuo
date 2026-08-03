@@ -42,7 +42,7 @@ if ! iptables -m connbytes -h 2>&1 | grep -q connbytes; then
 	exit 0
 fi
 
-require_nc
+require_python3
 
 cleanup() {
 	[[ -n "${TCPSHARK_PID:-}" ]] && kill "${TCPSHARK_PID}" 2> /dev/null || true
@@ -92,8 +92,10 @@ log_info "connbytes rule: drop reply packet #30 in client netns"
 TCPSHARK_PID=$!
 sleep 1
 
-# 4. Server: nc listens and sends 2 MB of data.
-ip netns exec "${NS_S}" bash -c "head -c ${PAYLOAD_SIZE} /dev/zero | timeout 10 $(nc_listen_cmd "${S_ADDR}" "${TEST_PORT}")" > /dev/null 2>&1 &
+# 4. Server: listen and send 2 MB of data.
+ip netns exec "${NS_S}" timeout 10 python3 "${ROOT_DIR}/integration/testdata/tcp_server.py" \
+	--listen-address "${S_ADDR}" --port "${TEST_PORT}" \
+	--payload-bytes "${PAYLOAD_SIZE}" > /dev/null 2>&1 &
 SRV_PID=$!
 sleep 0.5
 

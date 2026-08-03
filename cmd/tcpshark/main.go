@@ -20,27 +20,40 @@ import (
 	"github.com/urfave/cli/v2"
 
 	"huatuo-bamai/internal/log"
+	"huatuo-bamai/internal/version"
 )
 
 //go:generate $BPF_COMPILE $BPF_INCLUDE -s $BPF_DIR/tcp_retransmit.c -o $BPF_DIR/tcp_retransmit.o
 
 const tcpSharkToolName = "tcpshark"
 
-var AppVersion = ""
+var (
+	AppVersion   string
+	AppGitCommit string
+	AppBuildTime string
+
+	versionInfo version.Info
+)
 
 func newApp() *cli.App {
 	return &cli.App{
-		Name:    tcpSharkToolName,
-		Version: AppVersion,
-		Usage:   "trace TCP events",
-		Flags:   appFlags(),
-		Action:  mainAction,
-		Before:  validateFlags,
+		Name:   tcpSharkToolName,
+		Usage:  "trace TCP events",
+		Flags:  appFlags(),
+		Action: mainAction,
+		Before: validateFlags,
 	}
 }
 
 func main() {
 	app := newApp()
+	versionInfo = version.Wire(app, version.Seed{
+		Name:      tcpSharkToolName,
+		Version:   AppVersion,
+		GitCommit: AppGitCommit,
+		BuildTime: AppBuildTime,
+	})
+
 	if err := app.Run(os.Args); err != nil {
 		log.Errorf("%v", err)
 		os.Exit(1)

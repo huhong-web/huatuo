@@ -15,11 +15,14 @@
 package main
 
 import (
+	"bytes"
 	"io"
 	"strings"
 	"testing"
 
 	"github.com/urfave/cli/v2"
+
+	"huatuo-bamai/internal/toolstream"
 )
 
 func TestAppName(t *testing.T) {
@@ -155,6 +158,59 @@ func TestAppRateLimitFlag(t *testing.T) {
 				t.Fatalf("max events/sec = %d, want %d", maxEventsPerSecond, tt.expected)
 			}
 		})
+	}
+}
+
+func TestAppSourceTypes(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		args []string
+		want string
+	}{
+		{name: "tools by default", want: toolstream.SourceTypesTool},
+		{
+			name: "events",
+			args: []string{"--source-types", toolstream.SourceTypesEvent},
+			want: toolstream.SourceTypesEvent,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			var sourceTypes string
+			app := newTestApp(func(c *cli.Context) error {
+				sourceTypes = c.String(cliFlagSourceTypes)
+				return nil
+			})
+			args := []string{"tcpshark", "--mode", "retransmit", "--bpf-path", "unused.o"}
+			args = append(args, tt.args...)
+
+			if err := app.Run(args); err != nil {
+				t.Fatalf("Run() error = %v", err)
+			}
+			if sourceTypes != tt.want {
+				t.Fatalf("source types = %q, want %q", sourceTypes, tt.want)
+			}
+		})
+	}
+}
+
+func TestAppHelpHidesSourceTypes(t *testing.T) {
+	t.Parallel()
+
+	var output bytes.Buffer
+	app := newTestApp(func(_ *cli.Context) error { return nil })
+	app.Writer = &output
+
+	if err := app.Run([]string{"tcpshark", "--help"}); err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if strings.Contains(output.String(), cliFlagSourceTypes) {
+		t.Fatalf("help output contains hidden flag %q", cliFlagSourceTypes)
 	}
 }
 

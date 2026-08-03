@@ -46,7 +46,7 @@ type Container struct {
 	Type               ContainerType     `json:"type"`
 	Qos                ContainerQos      `json:"qos"`
 	IPAddress          string            `json:"net_ip_address"`
-	NetNamespaceInode  uint64            `json:"net_namespace_inode"`
+	NetNamespaceInum   uint64            `json:"net_namespace_inum"`
 	NetNamespaceCookie uint64            `json:"net_namespace_cookie"`
 	InitPid            int               `json:"init_pid"`
 	CgroupPath         string            `json:"cgroup_path"`
@@ -174,9 +174,9 @@ func containerBy[T comparable](selector func(*Container) T, val T) (*Container, 
 	return nil, nil
 }
 
-// ContainerByNetInode returns the container whose net namespace inode matches.
-func ContainerByNetInode(inode uint64) (*Container, error) {
-	return containerBy(func(c *Container) uint64 { return c.NetNamespaceInode }, inode)
+// ContainerByNetInum returns the container whose network namespace inum matches.
+func ContainerByNetInum(inum uint64) (*Container, error) {
+	return containerBy(func(c *Container) uint64 { return c.NetNamespaceInum }, inum)
 }
 
 // GetCSSToContainerID builds a mapping from cgroup subsystem address to container ID.

@@ -45,7 +45,7 @@ HUATUO（华佗）是由滴滴开源并依托 CCF（中国计算机学会）孵�
 
 ## 1. 过滤表达式
 
-`tcpshark --filter` 与 dropwatch 使用相同的 tcpdump 风格过滤表达式。支持的语法、限制和示例请参考 [dropwatch 文档](https://docs.huatuo.tech/en/latest/best-practice/dropwatch/)。
+`tcpshark --filter` 与 dropwatch 使用相同的 tcpdump 风格过滤表达式。支持的语法、限制和示例请参考 [dropwatch 文档](/docs/best-practice/dropwatch_zh.md)。
 
 > `--filter` 不能保证整个输出流都满足表达式：`tcp_retransmit_synack` 和已开启的 `tcp_send_loss_probe` 事件仍会输出。如果独立工具的 JSON 输出需要过滤全部事件类型，应使用 `jq` 按格式化后的地址和端口字段过滤。
 
@@ -119,11 +119,11 @@ sudo tcpshark --mode retransmit --bpf-path bpf/tcp_retransmit.o \
 | `container_id` | string | huatuo-bamai 解析出的容器 ID，见 §6。 |
 | `memcg_css` | uint64 | 用于解析容器归属的 socket 内存 cgroup CSS 地址。 |
 | `net_namespace_cookie` | uint64 | 用于解析容器归属的 socket 网络命名空间 cookie。 |
-| `net_namespace_inode` | uint32 | 用于解析容器归属的 socket 网络命名空间 inode。 |
-| `saddr` | string | 源 IP 地址。 |
-| `daddr` | string | 目的 IP 地址。 |
-| `sport` | uint16 | 源端口。 |
-| `dport` | uint16 | 目的端口。 |
+| `net_namespace_inum` | uint32 | 用于解析容器归属的 socket 网络命名空间 inum。 |
+| `tcp_saddr` | string | 源 IP 地址。 |
+| `tcp_daddr` | string | 目的 IP 地址。 |
+| `tcp_sport` | uint16 | 源端口。 |
+| `tcp_dport` | uint16 | 目的端口。 |
 | `tcp_state` | string | TCP socket 状态，如 `ESTABLISHED`、`SYN_SENT` 或 `NEW_SYN_RECV`。 |
 | `phase` | string | 分类结果：`connect`、`data` 或 `close`。 |
 | `tcp_reason` | string | 分类结果：`RTO`、`fast_retransmit`、`reorder_prone_fast`、`TLP` 或 `unknown`。 |
@@ -134,12 +134,12 @@ sudo tcpshark --mode retransmit --bpf-path bpf/tcp_retransmit.o \
 | `reord_seen` | uint32 | 连接累计乱序计数器。 |
 | `dsack_dups` | uint32 | 累计 DSACK 重复计数器。 |
 | `tcp_seq` | uint32 | SKB 事件中 `TCP_SKB_CB(skb)->seq`，即重传段起始序列号；SYN-ACK 事件中为零。 |
-| `tcp_ack` | uint32 | SKB 事件中 `tcp_sk(sk)->rcv_nxt`，即实际重传包 TCP 头会携带的 ACK 序号；SYN-ACK 事件中为零。 |
+| `tcp_ack_seq` | uint32 | SKB 事件中 `tcp_sk(sk)->rcv_nxt`，即实际重传包 TCP 头会携带的 ACK 序号；SYN-ACK 事件中为零。 |
 | `tcp_end_seq` | uint32 | SKB 事件中 `TCP_SKB_CB(skb)->end_seq`，即重传段结束序列号；SYN-ACK 事件中省略。 |
 | `tcp_flags` | string | 渲染后的 TCP flag 集合，如 `SYN|ACK`、`ACK|PSH`；SKB 事件来自 `TCP_SKB_CB(skb)->tcp_flags`，SYN-ACK 事件由事件类型派生。 |
 | `skb_addr` | string | 十六进制重传队列 SKB 指针；SYN-ACK 事件中不存在。 |
 | `drop_location` | string | huatuo-bamai 生成的丢包关联启发式结果，见 §7。 |
-| `source` | string | 可选来源字段；存在时标识 `events` 或 `tools`。独立 CLI 当前不设置该字段。 |
+| `source` | string | 事件来源。独立运行 tcpshark 时为 `tools`，由 huatuo-bamai 启动时为 `events`。 |
 
 `icsk_pending` 是 hook 时刻的定时器状态快照，不是重传原因的稳定枚举。TLP 分类以明确的 `event_type=tcp_send_loss_probe` 为准，不依赖 `icsk_pending=5`。
 
@@ -155,16 +155,16 @@ sudo tcpshark --mode retransmit --bpf-path bpf/tcp_retransmit.o \
 
 ### 文本输出格式
 
-文本输出保留面向终端的可读布局，同时覆盖与 JSON 相同的事件变量。带 `omitempty` 的变量仅在非零或非空时显示，字符串值不添加 JSON 引号或转义。为兼容原文本格式，`state`、`skb`、`seq`、`end`、`ack`、`flags`、`ca` 和 `retrans` 分别对应 JSON 中的 `tcp_state`、`skb_addr`、`tcp_seq`、`tcp_end_seq`、`tcp_ack`、`tcp_flags`、`ca_state` 和 `icsk_retransmits`。
+文本输出保留面向终端的可读布局，同时覆盖与 JSON 相同的事件变量。带 `omitempty` 的变量仅在非零或非空时显示，字符串值不添加 JSON 引号或转义。为兼容原文本格式，`state`、`skb`、`seq`、`end`、`ack`、`flags`、`ca` 和 `retrans` 分别对应 JSON 中的 `tcp_state`、`skb_addr`、`tcp_seq`、`tcp_end_seq`、`tcp_ack_seq`、`tcp_flags`、`ca_state` 和 `icsk_retransmits`。
 
 ```
-<timestamp> [<phase>/<tcp_reason>] <saddr>:<sport> > <daddr>:<dport> state=<STATE> event_type=<TYPE> [SYNACK] [skb=<ADDR>] seq=<N> [end=<N>] ack=<N> [flags=<FLAGS>] pid=<N> comm=<COMM> ca=<N> retrans=<N> icsk_pending=<N> [reord_seen=<N>] [dsack_dups=<N>] [container_id=<ID>] [memcg_css=<N>] [net_namespace_cookie=<N>] [net_namespace_inode=<N>] [drop_location=<LOCATION>] [source=<SOURCE>]
+<timestamp> [<phase>/<tcp_reason>] <saddr>:<sport> > <daddr>:<dport> state=<STATE> event_type=<TYPE> [SYNACK] [skb=<ADDR>] seq=<N> [end=<N>] ack=<N> [flags=<FLAGS>] pid=<N> comm=<COMM> ca=<N> retrans=<N> icsk_pending=<N> [reord_seen=<N>] [dsack_dups=<N>] [container_id=<ID>] [memcg_css=<N>] [net_namespace_cookie=<N>] [net_namespace_inum=<N>] [drop_location=<LOCATION>] [source=<SOURCE>]
 ```
 
 示例：
 
 ```
-2026-07-23T02:14:40.304775546Z [data/RTO] 127.0.0.1:19996 > 127.0.0.1:42128 state=ESTABLISHED event_type=tcp_retransmit_skb skb=0xffff931c14fdf800 seq=3154974646 end=3154991030 ack=948393597 flags=ACK|PSH pid=1420 comm=kube-apiserver ca=4 retrans=4 icsk_pending=0 net_namespace_inode=4026531992
+2026-07-23T02:14:40.304775546Z [data/RTO] 127.0.0.1:19996 > 127.0.0.1:42128 state=ESTABLISHED event_type=tcp_retransmit_skb skb=0xffff931c14fdf800 seq=3154974646 end=3154991030 ack=948393597 flags=ACK|PSH pid=1420 comm=kube-apiserver ca=4 retrans=4 icsk_pending=0 net_namespace_inum=4026531992
 ```
 
 示例中的 `pid` 和 `comm` 表示 hook 运行时的执行上下文；工作负载归属应使用 `container_id` 和 socket 元数据判断。
@@ -292,7 +292,7 @@ curl -X PUT http://localhost:19704/tracers/tcp_retransmit/stop
 | 模式 | 行为 |
 |------|------|
 | 独立 stdout 输出 | `container_id` 通常不存在；可用时仍会输出 socket memcg/netns 元数据。 |
-| huatuo-bamai / `--output-storage` | `container_id` 为空时，依次尝试 `memcg_css`、`net_namespace_cookie`、`net_namespace_inode`。 |
+| huatuo-bamai / `--output-storage` | `container_id` 为空时，依次尝试 `memcg_css`、`net_namespace_cookie`、`net_namespace_inum`。 |
 
 全部解析未命中时，`container_id` 保持为空，事件仍会存储。`pid`/`comm` 描述的是 hook 执行上下文，不应作为判断 socket 归属的回退依据。
 

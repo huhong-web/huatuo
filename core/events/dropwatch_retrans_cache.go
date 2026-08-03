@@ -22,29 +22,29 @@ import (
 	"huatuo-bamai/pkg/types"
 )
 
-type dropCacheEntry struct {
+type dropwatchRetransCacheEntry struct {
 	ev       *types.DropWatchTracing
 	expiryAt time.Time
 }
 
-type dropCache struct {
+type dropwatchRetransCache struct {
 	mu            sync.Mutex
 	isEnabled     bool
-	entries       map[connKey][]dropCacheEntry
+	entries       map[connKey][]dropwatchRetransCacheEntry
 	window        time.Duration
 	lastCleanupAt time.Time
 }
 
-var globalDropCache = newDropCache(2 * time.Second)
+var globalDropwatchRetransCache = newDropwatchRetransCache(2 * time.Second)
 
-func newDropCache(window time.Duration) *dropCache {
-	return &dropCache{
-		entries: make(map[connKey][]dropCacheEntry),
+func newDropwatchRetransCache(window time.Duration) *dropwatchRetransCache {
+	return &dropwatchRetransCache{
+		entries: make(map[connKey][]dropwatchRetransCacheEntry),
 		window:  window,
 	}
 }
 
-func (c *dropCache) enable() {
+func (c *dropwatchRetransCache) enable() {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
@@ -55,7 +55,7 @@ func (c *dropCache) enable() {
 	c.resetLocked()
 }
 
-func (c *dropCache) disable() {
+func (c *dropwatchRetransCache) disable() {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
@@ -66,12 +66,12 @@ func (c *dropCache) disable() {
 	c.resetLocked()
 }
 
-func (c *dropCache) resetLocked() {
-	c.entries = make(map[connKey][]dropCacheEntry)
+func (c *dropwatchRetransCache) resetLocked() {
+	c.entries = make(map[connKey][]dropwatchRetransCacheEntry)
 	c.lastCleanupAt = time.Time{}
 }
 
-func (c *dropCache) add(ev *types.DropWatchTracing) {
+func (c *dropwatchRetransCache) add(ev *types.DropWatchTracing) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
@@ -86,7 +86,7 @@ func (c *dropCache) add(ev *types.DropWatchTracing) {
 
 	now := time.Now()
 	c.cleanupExpired(now)
-	c.entries[key] = append(c.entries[key], dropCacheEntry{
+	c.entries[key] = append(c.entries[key], dropwatchRetransCacheEntry{
 		ev:       ev,
 		expiryAt: now.Add(c.window),
 	})
@@ -99,18 +99,18 @@ func makeDropKeyFromLayers(p *packet.Packet) (connKey, bool) {
 	var saddr, daddr string
 	switch {
 	case p.IPv4 != nil:
-		saddr = p.IPv4.Src.String()
-		daddr = p.IPv4.Dst.String()
+		saddr = p.IPv4.Saddr.String()
+		daddr = p.IPv4.Daddr.String()
 	case p.IPv6 != nil:
-		saddr = p.IPv6.Src.String()
-		daddr = p.IPv6.Dst.String()
+		saddr = p.IPv6.Saddr.String()
+		daddr = p.IPv6.Daddr.String()
 	default:
 		return "", false
 	}
-	return makeConnKey(saddr, daddr, p.TCP.SrcPort, p.TCP.DstPort), true
+	return makeConnKey(saddr, daddr, p.TCP.Sport, p.TCP.Dport), true
 }
 
-func (c *dropCache) correlate(retrans *types.TCPRetransTracing) (RetransDropCausal, *types.DropWatchTracing) {
+func (c *dropwatchRetransCache) correlate(retrans *types.TCPRetransTracing) (RetransDropCausal, *types.DropWatchTracing) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
@@ -125,9 +125,9 @@ func (c *dropCache) correlate(retrans *types.TCPRetransTracing) (RetransDropCaus
 		return RetransNoDrop, nil
 	}
 
-	var best RetransDropCausal = RetransNoDrop
+	best := RetransNoDrop
 	var bestDrop *types.DropWatchTracing
-	live := []dropCacheEntry{}
+	live := []dropwatchRetransCacheEntry{}
 
 	for _, e := range entries {
 		if now.After(e.expiryAt) {
@@ -151,13 +151,13 @@ func (c *dropCache) correlate(retrans *types.TCPRetransTracing) (RetransDropCaus
 	return best, bestDrop
 }
 
-func (c *dropCache) cleanupExpired(now time.Time) {
+func (c *dropwatchRetransCache) cleanupExpired(now time.Time) {
 	if !c.lastCleanupAt.IsZero() && now.Sub(c.lastCleanupAt) < c.window {
 		return
 	}
 
 	for key, entries := range c.entries {
-		live := make([]dropCacheEntry, 0, len(entries))
+		live := make([]dropwatchRetransCacheEntry, 0, len(entries))
 		for _, entry := range entries {
 			if !now.After(entry.expiryAt) {
 				live = append(live, entry)

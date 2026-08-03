@@ -21,7 +21,7 @@ import (
 	"huatuo-bamai/internal/cgroups/subsystem"
 )
 
-func TestResolveContainerIDFromMeta(t *testing.T) {
+func TestContainerIDByCgroupNetNS(t *testing.T) {
 	previousContainers := containers
 	previousUpdatedAt := lastUpdatedAt
 
@@ -36,10 +36,10 @@ func TestResolveContainerIDFromMeta(t *testing.T) {
 			Type:               ContainerTypeNormal,
 			NetNamespaceCookie: 22,
 		},
-		"inode": {
-			ID:                "inode",
-			Type:              ContainerTypeNormal,
-			NetNamespaceInode: 33,
+		"inum": {
+			ID:               "inum",
+			Type:             ContainerTypeNormal,
+			NetNamespaceInum: 33,
 		},
 	}
 	lastUpdatedAt = time.Now()
@@ -50,42 +50,42 @@ func TestResolveContainerIDFromMeta(t *testing.T) {
 
 	tests := []struct {
 		name string
-		meta ContainerMeta
+		ids  ContainerCgroupNetNS
 		want string
 	}{
 		{
 			name: "css takes precedence",
-			meta: ContainerMeta{
+			ids: ContainerCgroupNetNS{
 				MemoryCgroupCSSAddr: 11,
 				NetNamespaceCookie:  22,
-				NetNamespaceInode:   33,
+				NetNamespaceInum:    33,
 			},
 			want: "css",
 		},
 		{
 			name: "net namespace cookie falls back after CSS miss",
-			meta: ContainerMeta{
+			ids: ContainerCgroupNetNS{
 				MemoryCgroupCSSAddr: 99,
 				NetNamespaceCookie:  22,
-				NetNamespaceInode:   33,
+				NetNamespaceInum:    33,
 			},
 			want: "cookie",
 		},
 		{
-			name: "net namespace inode falls back after CSS and cookie misses",
-			meta: ContainerMeta{
+			name: "net namespace inum falls back after CSS and cookie misses",
+			ids: ContainerCgroupNetNS{
 				MemoryCgroupCSSAddr: 99,
 				NetNamespaceCookie:  88,
-				NetNamespaceInode:   33,
+				NetNamespaceInum:    33,
 			},
-			want: "inode",
+			want: "inum",
 		},
 		{
 			name: "no matching metadata",
-			meta: ContainerMeta{
+			ids: ContainerCgroupNetNS{
 				MemoryCgroupCSSAddr: 99,
 				NetNamespaceCookie:  88,
-				NetNamespaceInode:   77,
+				NetNamespaceInum:    77,
 			},
 			want: "",
 		},
@@ -93,9 +93,9 @@ func TestResolveContainerIDFromMeta(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := ResolveContainerIDFromMeta(tt.meta)
+			got := ContainerIDByCgroupNetNS(tt.ids)
 			if got != tt.want {
-				t.Errorf("ResolveContainerIDFromMeta(%+v) = %q, want %q", tt.meta, got, tt.want)
+				t.Errorf("ContainerIDByCgroupNetNS(%+v) = %q, want %q", tt.ids, got, tt.want)
 			}
 		})
 	}
