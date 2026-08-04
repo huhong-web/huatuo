@@ -1,0 +1,116 @@
+name: pr-name
+on:
+  push:
+    branches:
+      - main
+  merge_group:
+  pull_request:
+    types: ['opened', 'edited', 'reopened', 'synchronize']
+
+jobs:
+  pr_name_lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3 
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+
+      - uses: actions/setup-node@395ad3262231945c25e8478fd5baf05154b1d79f 
+        name: Install Node.js
+        with:
+          node-version: 18 
+      - name: Install dependencies
+        run: |
+          npm install @commitlint/lint@18.6.1 @commitlint/load@18.6.1 @commitlint/config-conventional@18.6.2 @actions/core
+
+      # check commit message of push event
+      - name: Lint commit messages (push event)
+        if: github.event_name == 'push'
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8.0.0
+        with:
+          script: |
+            const { execSync } = require('child_process');
+            const load = require('@commitlint/load').default;
+            const lint = require('@commitlint/lint').default;
+
+            const CONFIG = {
+              extends: ['./commitlint.config.js'],
+            };
+
+            const commit = execSync('git log -1 --format=%s').toString().trim();
+
+            core.info(`Validating: ${commit}`);
+
+            const wordRegex = /[\u4e00-\u9fff\u3400-\u4dbf]/;
+
+            if (wordRegex.test(commit)) {
+              core.error(`Contains upported character - "${commit}"`);
+              core.error('   Please use English only.');
+              core.setFailed('Commit must be in English only.');
+              return;
+            }
+
+            load(CONFIG).then((opts) => {
+              lint(commit, opts.rules, opts.parserPreset ? {parserOpts: opts.parserPreset.parserOpts} : {})
+                .then((report) => {
+                  if (report.valid) {
+                    core.info(`Passed - "${commit}"`);
+                  } else {
+                    report.warnings.forEach((warning) => {
+                      core.warning(`${warning.message}`);
+                    });
+
+                    report.errors.forEach((error) => {
+                      core.error(`${error.message}`);
+                    });
+
+                    core.setFailed('Commit message must follow conventional format.');
+                  }
+                });
+            });
+      # check commit message of pull request
+      - name: Lint PR name (pull_request event)
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8.0.0
+        if: github.event_name == 'pull_request'  
+        with:
+          script: |
+            const load = require('@commitlint/load').default;
+            const lint = require('@commitlint/lint').default;
+
+            const CONFIG = {
+              extends: ['./commitlint.config.js'],
+            };
+
+            const title = context.payload.pull_request.title;
+
+            core.info(`Linting: ${title}`);
+            const wordRegex = /[\u4e00-\u9fff\u3400-\u4dbf]/;;
+            if (wordRegex.test(title)) {
+              core.error(`Commit ${index + 1}: Contains unspported characters - "${title}"`);
+              core.error('   Please use English only.');
+              core.setFailed('PR title must be in English only.');
+              return;
+            }
+            load(CONFIG)
+              .then((opts) => {
+                lint(
+                  title,
+                  opts.rules,
+                  opts.parserPreset ? {parserOpts: opts.parserPreset.parserOpts} : {}
+                ).then((report) => {
+                  report.warnings.forEach((warning) => {
+                    core.warning(warning.message);
+                  });
+
+                  report.errors.forEach((error) => {
+                    core.error(error.message);
+                  });
+
+                  if (!report.valid) {
+                    core.setFailed("PR title linting failed");
+                  }
+                });
+              });
+
+
