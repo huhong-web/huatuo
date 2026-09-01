@@ -82,8 +82,6 @@ func handleDropwatchEvent(_ *toolstream.Session, ev *types.DropWatchTracing) err
 		})
 	}
 
-	globalDropwatchTCPRetransmitCache.add(ev)
-
 	return tracing.Save(&tracing.WriteRequest{
 		TracerName:  "dropwatch",
 		ContainerID: ev.ContainerID,

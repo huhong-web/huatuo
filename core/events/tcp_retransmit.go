@@ -15,17 +15,23 @@
 package events
 
 import (
+	"bufio"
 	"context"
 	"errors"
 	"fmt"
+	"io"
+	"os"
+	"os/exec"
 	"path"
 	"strconv"
+	"syscall"
 	"time"
 
 	internalconfig "huatuo-bamai/internal/config"
+	"huatuo-bamai/internal/log"
+	"huatuo-bamai/internal/pcapfilter"
 	"huatuo-bamai/internal/pod"
 	"huatuo-bamai/internal/toolstream"
-	"huatuo-bamai/internal/utils/executil"
 	"huatuo-bamai/internal/utils/kernaddr"
 	"huatuo-bamai/pkg/tracing"
 	"huatuo-bamai/pkg/types"
@@ -36,6 +42,7 @@ type tcpRetransmitTracing struct{}
 const (
 	tcpRetransmitTracerName = "tcp_retransmit"
 	tcpSharkToolName        = "tcpshark"
+	tcpSharkStopTimeout     = 7 * time.Second
 )
 
 func init() {
@@ -44,6 +51,9 @@ func init() {
 }
 
 func newTCPRetransmit() (*tracing.EventTracingAttr, error) {
+	if err := validateTCPRetransmitFilter(configSnapshot()); err != nil {
+		return nil, err
+	}
 	return &tracing.EventTracingAttr{
 		TracingData: &tcpRetransmitTracing{},
 		Interval:    10,
@@ -51,36 +61,198 @@ func newTCPRetransmit() (*tracing.EventTracingAttr, error) {
 	}, nil
 }
 
+func validateTCPRetransmitFilter(config *Config) error {
+	if !config.TCPRetransmit.EnableDropwatchCorrelation {
+		return nil
+	}
+	if err := pcapfilter.ValidateL3Compatible(effectiveTCPRetransmitFilter(config)); err != nil {
+		return fmt.Errorf(
+			"EventTracing.TCPRetransmit.Filter is incompatible with local correlation: %w",
+			err,
+		)
+	}
+	return nil
+}
+
 // Start launches tcpshark in retransmit mode and waits for it to finish.
 // Events are received via the default toolstream server registered in init.
 func (c *tcpRetransmitTracing) Start(ctx context.Context) error {
-	globalDropwatchTCPRetransmitCache.enable()
-	defer globalDropwatchTCPRetransmitCache.disable()
-
-	cfg := configSnapshot()
-	args := []string{
-		"--mode", "retransmit",
-		"--bpf-path", path.Join(internalconfig.CoreBpfDir, "tcp_retransmit.o"),
-		"--output-storage", toolstream.DefaultSockPath,
-		"--max-events-per-second", strconv.FormatUint(cfg.TCPRetransmit.MaxEventsPerSecond, 10),
-		"--source-types", toolstream.SourceTypeEvent,
+	config := configSnapshot()
+	cmd := exec.Command(
+		path.Join(internalconfig.CoreBinDir, tcpSharkToolName),
+		tcpRetransmitArgs(config)...,
+	)
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return fmt.Errorf("start tcpshark: stdout pipe: %w", err)
+	}
+	stderr, err := cmd.StderrPipe()
+	if err != nil {
+		return fmt.Errorf("start tcpshark: stderr pipe: %w", err)
+	}
+	if err := cmd.Start(); err != nil {
+		return fmt.Errorf("start tcpshark: %w", err)
 	}
 
-	if cfg.TCPRetransmit.Filter != "" {
-		args = append(args, "--filter", cfg.TCPRetransmit.Filter)
+	// Both drains must report even when one read failure starts shutdown.
+	outputResults := make(chan error, 2)
+	outputReadFailed := make(chan struct{}, 1)
+	drainOutput := func(name string, output io.Reader) {
+		go func() {
+			err := logSubprocessOutput(name, output)
+			outputResults <- err
+			if err != nil {
+				select {
+				case outputReadFailed <- struct{}{}:
+				default:
+				}
+			}
+		}()
 	}
-	if cfg.TCPRetransmit.EnableTLP {
-		args = append(args, "--enable-tlp")
-	}
+	drainOutput("tcpshark stdout", stdout)
+	drainOutput("tcpshark stderr", stderr)
 
-	result := executil.ExecCmd(ctx, 0, path.Join(internalconfig.CoreBinDir, tcpSharkToolName), args...)
-	if errors.Is(result.CmdErr, context.Canceled) {
+	log.Infof("tcpshark started pid=%d", cmd.Process.Pid)
+	done := make(chan error, 1)
+	go func() {
+		// Wait closes the command pipes, so both readers must finish first.
+		outputErr := errors.Join(<-outputResults, <-outputResults)
+		done <- errors.Join(outputErr, cmd.Wait())
+	}()
+
+	select {
+	case <-ctx.Done():
+		if err := stopTCPShark(cmd, done, stdout, stderr); err != nil {
+			return err
+		}
+		log.Info("tcpshark stopped")
+		return nil
+	case <-outputReadFailed:
+		return stopTCPShark(cmd, done, stdout, stderr)
+	case err := <-done:
+		if err != nil {
+			return fmt.Errorf("tcpshark exited: %w", err)
+		}
+		log.Info("tcpshark exited")
 		return nil
 	}
-	if result.CmdErr != nil {
-		return fmt.Errorf("run %s: %w", tcpSharkToolName, executil.VerifyResults([]executil.CmdResult{result}))
+}
+
+func tcpRetransmitArgs(config *Config) []string {
+	args := []string{
+		"--mode", "retransmit",
+		"--output-storage", toolstream.DefaultSockPath,
+		"--max-events-per-second", strconv.FormatUint(config.TCPRetransmit.MaxEventsPerSecond, 10),
+		"--source-types", toolstream.SourceTypeEvent,
+	}
+	if config.TCPRetransmit.EnableDropwatchCorrelation {
+		args = append(
+			args,
+			"--with-dropwatch",
+			"--bpf-path-dir", internalconfig.CoreBpfDir,
+		)
+	} else {
+		args = append(
+			args,
+			"--bpf-path", path.Join(internalconfig.CoreBpfDir, "tcp_retransmit.o"),
+		)
+	}
+	if filter := effectiveTCPRetransmitFilter(config); filter != "" {
+		args = append(args, "--filter", filter)
+	}
+	if config.TCPRetransmit.EnableTLP {
+		args = append(args, "--enable-tlp")
+	}
+	return args
+}
+
+func logSubprocessOutput(name string, output io.Reader) error {
+	if err := drainSubprocessOutput(output, func(fragment []byte) {
+		log.Warnf("%s: %s", name, fragment)
+	}); err != nil {
+		return fmt.Errorf("read %s: %w", name, err)
 	}
 	return nil
+}
+
+func drainSubprocessOutput(output io.Reader, consume func([]byte)) error {
+	reader := bufio.NewReader(output)
+	for {
+		fragment, _, err := reader.ReadLine()
+		if len(fragment) != 0 || err == nil {
+			consume(fragment)
+		}
+		if err == nil {
+			continue
+		}
+		if errors.Is(err, io.EOF) {
+			return nil
+		}
+		return err
+	}
+}
+
+func stopTCPShark(
+	cmd *exec.Cmd,
+	done <-chan error,
+	stdout io.Closer,
+	stderr io.Closer,
+) error {
+	if err := cmd.Process.Signal(syscall.SIGTERM); err != nil &&
+		!errors.Is(err, os.ErrProcessDone) {
+		killErr := cmd.Process.Kill()
+		closeErr := closeTCPSharkOutput(stdout, stderr)
+		waitErr := <-done
+		return errors.Join(
+			fmt.Errorf("stop tcpshark: signal: %w", err),
+			wrapTCPSharkStopError("force kill", killErr),
+			wrapTCPSharkStopError("close output", closeErr),
+			wrapTCPSharkStopError("wait", waitErr),
+		)
+	}
+
+	timer := time.NewTimer(tcpSharkStopTimeout)
+	defer timer.Stop()
+	select {
+	case err := <-done:
+		return wrapTCPSharkStopError("wait", err)
+	case <-timer.C:
+		killErr := cmd.Process.Kill()
+		closeErr := closeTCPSharkOutput(stdout, stderr)
+		waitErr := <-done
+		return errors.Join(
+			fmt.Errorf("stop tcpshark: graceful timeout after %s", tcpSharkStopTimeout),
+			wrapTCPSharkStopError("force kill", killErr),
+			wrapTCPSharkStopError("close output", closeErr),
+			wrapTCPSharkStopError("wait", waitErr),
+		)
+	}
+}
+
+func closeTCPSharkOutput(stdout, stderr io.Closer) error {
+	var stdoutErr error
+	if stdout != nil {
+		stdoutErr = stdout.Close()
+		if errors.Is(stdoutErr, os.ErrClosed) {
+			stdoutErr = nil
+		}
+	}
+
+	var stderrErr error
+	if stderr != nil {
+		stderrErr = stderr.Close()
+		if errors.Is(stderrErr, os.ErrClosed) {
+			stderrErr = nil
+		}
+	}
+	return errors.Join(stdoutErr, stderrErr)
+}
+
+func wrapTCPSharkStopError(operation string, err error) error {
+	if err == nil || errors.Is(err, os.ErrProcessDone) {
+		return nil
+	}
+	return fmt.Errorf("stop tcpshark: %s: %w", operation, err)
 }
 
 func handleTCPRetransmitEvent(_ *toolstream.Session, ev *types.TCPRetransmitTracing) error {
@@ -90,11 +262,6 @@ func handleTCPRetransmitEvent(_ *toolstream.Session, ev *types.TCPRetransmitTrac
 			NetNamespaceCookie:  ev.NetNamespaceCookie,
 			NetNamespaceInum:    uint64(ev.NetNamespaceInum),
 		})
-	}
-
-	if ev.DropLocation == "" {
-		causal, _ := globalDropwatchTCPRetransmitCache.correlate(ev)
-		ev.DropLocation = causalToDropLocation(causal)
 	}
 
 	return tracing.Save(&tracing.WriteRequest{
