@@ -81,7 +81,7 @@ lifecycle_stop() {
 	if [[ ${phase} == negative || ${signal} == KILL ]]; then
 		# Recheck after the suppression window, in the same daemon run.
 		if [[ ${lifecycle_mode} != blacklist ]]; then
-			go_snapshot_watch_is_ready || fatal "target watch disappeared during negative assertion"
+			go_snapshot_watch_is_ready || fatal "could not confirm target watch is present during negative assertion"
 			lifecycle_recovery_checkpoint="revalidated target watch"
 		else
 			huatuo_bamai_containers_present "${GO_SNAPSHOT_NAMESPACE}" "^${go_snapshot_pod}$" 1 \
@@ -124,7 +124,7 @@ lifecycle_workload() {
 	mkfifo "${go_snapshot_case_dir}/commands-${phase}"
 	exec {go_snapshot_input_fd}<> "${go_snapshot_case_dir}/commands-${phase}"
 	(
-		echo "${BASHPID}" > "${go_snapshot_cgroup}/cgroup.procs"
+		snapshot_join_container_cgroup
 		echo 1000 > /proc/self/oom_score_adj
 		exec "${GO_SNAPSHOT_BIN}" 1
 	) < "${go_snapshot_case_dir}/commands-${phase}" > "${go_snapshot_case_dir}/workload-${phase}.log" 2>&1 &
@@ -315,7 +315,7 @@ lifecycle_contention() {
 		lifecycle_contention_input high
 		wait_until 10 .01 snapshot_read_barrier_ready || fatal "host target was not captured among the top three processes"
 		if [[ ${lifecycle_mode} == contention_cancel ]]; then
-			go_snapshot_watch_is_ready || fatal "target watch disappeared before cancellation"
+			go_snapshot_watch_is_ready || fatal "could not confirm target watch is present before cancellation"
 			lifecycle_watch_verified_at=$(date -u '+%Y-%m-%dT%H:%M:%S.%NZ')
 			kill -TERM "$(cat "${HUATUO_BAMAI_TEST_TMPDIR}/huatuo-bamai.pid")"
 			wait_until 10 .01 grep -Fq 'msg="Caller request to stop"' "${HUATUO_BAMAI_TEST_TMPDIR}/huatuo.log" || fatal "memburst did not observe context cancellation"
