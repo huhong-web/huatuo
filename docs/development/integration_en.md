@@ -157,3 +157,37 @@ New *.txt files are automatically picked up by the test.
 bash integration/run.sh
 ```
 The test fails if any expected metric is missing or mismatched.
+
+### Daemon cgroup resource limits
+
+`test_runtime_limits.sh` checks that default startup inherits the test process's
+cgroup. With `--enable-cgroup`, it verifies membership through `/proc/PID/cgroup`
+and `cgroup.procs`, reads the startup and steady CPU limits, and checks the
+MiB-to-byte conversion for `MemoryLimitMiB`. It then changes all three Runtime
+settings and repeats after a graceful stop and restart. It also checks exit
+status, removal of the daemon's cgroups, and absence of error/panic/fatal logs.
+This verifies configured kernel limits, not CPU throughput or OOM behavior.
+
+The test copies the fixtures and replaces only the copied XFS device with a
+FIFO. Its observer waits for XFS to open that device, verifies startup limits,
+then supplies the fixture bytes to release initialization. Startup and observer
+completion have deadlines; a missing gate is a failure. This depends on the
+synchronous XFS constructor running before the steady CPU quota is applied.
+No production hooks or real device files are changed.
+
+Run on an isolated Linux test VM with writable CPU and memory controllers.
+The same assertions read quota/period and memory files on v1/hybrid hosts, or
+`cpu.max`/`memory.max` on pure v2 hosts. V2 also requires a reachable systemd
+manager. Missing capabilities or an existing bamai runtime cgroup produce a
+reported SKIP; existing groups are never reused or deleted. Run separately on
+both hierarchies to establish v1 and v2 coverage. Storage and kubelet are disabled.
+
+After building, run this case from the integration directory:
+
+```bash
+cd integration
+```
+
+```bash
+bash run.sh test_runtime_limits.sh
+```

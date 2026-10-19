@@ -16,6 +16,23 @@
 
 set -euo pipefail
 
+# Keep only XFS: its copied device fixture gates initialization before the CPU switch.
+write_runtime_limits_config() {
+	local port=$1 startup_cpu=$2 cpu=$3 memory_mib=$4
+	cat > "${HUATUO_BAMAI_TEST_TMPDIR}/bamai.conf" << EOF
+BlackList = ["arp", "ascend_npu", "cpu_stat", "cpu_util", "cpuidle", "cpusys", "diskio", "dload", "dropwatch", "hungtask", "iolatency", "iotracing", "irqtracing", "loadavg", "memburst", "memory_buddyinfo", "memory_events", "memory_free", "memory_others", "memory_reclaim", "memory_reclaim_events", "memory_threshold_snapshot", "memory_vmstat", "metax_gpu", "mountpoint_perm", "mthreads_gpu", "mthreads_xid", "net_conntrack", "net_rx_latency", "netdev", "netdev_bonding_lacp", "netdev_dcb", "netdev_events", "netdev_hw", "netdev_qdisc", "netdev_rdma_link", "netdev_txqueue_timeout", "netstat", "memory_oom_kill", "ras", "runqlat", "sched_tick", "sockstat", "softirq", "softlockup", "tcp_memory", "tcp_retransmit", "tracing_status"]
+
+[Runtime]
+    StartupCPULimitCores = ${startup_cpu}
+    CPULimitCores = ${cpu}
+    MemoryLimitMiB = ${memory_mib}
+[HTTPServer]
+    ListenAddress = "127.0.0.1:${port}"
+[HTTPServer.Auth]
+    BearerToken = "integration-node-token"
+EOF
+}
+
 # write_default_config writes the baseline integration test config.
 write_default_config() {
 	cat > "${HUATUO_BAMAI_TEST_TMPDIR}/bamai.conf" << 'EOF'
