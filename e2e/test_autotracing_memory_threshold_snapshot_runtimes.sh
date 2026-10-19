@@ -94,8 +94,8 @@ snapshot_run_case() (
 	# The case subshell closes this descriptor on exit.
 	exec {go_snapshot_input_fd}<> "${go_snapshot_case_dir}/commands"
 	(
-		echo "${BASHPID}" > "${go_snapshot_cgroup}/cgroup.procs"
-		# Match the BestEffort Pod's sleep process so the larger Go RSS wins.
+		snapshot_join_container_cgroup
+		# Prefer the pressure workload over the Pod's sleep process on OOM.
 		echo 1000 > /proc/self/oom_score_adj
 		exec "${workload[@]}"
 	) < "${go_snapshot_case_dir}/commands" > "${go_snapshot_case_dir}/workload.log" 2>&1 &
