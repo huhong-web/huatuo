@@ -29,7 +29,7 @@ memory_threshold_snapshot_setup() {
 	readonly GO_SNAPSHOT_THRESHOLD=$((GO_SNAPSHOT_LIMIT / 2))
 	readonly GO_SNAPSHOT_NAMESPACE="${BUSINESS_POD_NS}"
 
-	require_commands go jq kubectl findmnt ss
+	require_commands go jq kubectl findmnt ss stat readlink awk
 	[[ ${EUID} -eq 0 ]] || skip "requires root for BPF, process inspection, and memory.high"
 	require_readable "${KUBELET_CERT}" "${KUBELET_KEY}"
 
@@ -81,11 +81,10 @@ memory_threshold_snapshot_cleanup() {
 # API discovery precedes asynchronous watch registration. Wait for the actual
 # limit watch before allocating pressure, so registration cannot trigger the test.
 go_snapshot_watch_is_ready() {
-	local inode
-	inode=$(stat -c '%i' "${go_snapshot_limit_file}") || return 1
-	printf -v inode '%x' "${inode}"
-	grep -qE "^inotify wd:.*ino:${inode} " \
-		/proc/"$(< "${HUATUO_BAMAI_TEST_TMPDIR}/huatuo-bamai.pid")"/fdinfo/* 2> /dev/null
+	local identity watches="${go_snapshot_case_dir}/watches.txt"
+	identity=$(cgroup_watch_identity "${go_snapshot_limit_file}") || return 1
+	cgroup_read_inotify_watches "$(< "${HUATUO_BAMAI_TEST_TMPDIR}/huatuo-bamai.pid")" "$watches" || return 1
+	grep -qFx -- "$identity" "$watches"
 }
 
 go_snapshot_read_event() {
