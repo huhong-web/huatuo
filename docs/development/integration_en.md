@@ -178,8 +178,10 @@ No production hooks or real device files are changed.
 Run on an isolated Linux test VM with writable CPU and memory controllers.
 The same assertions read quota/period and memory files on v1/hybrid hosts, or
 `cpu.max`/`memory.max` on pure v2 hosts. V2 also requires a reachable systemd
-manager. Missing capabilities or an existing bamai runtime cgroup produce a
-reported SKIP; existing groups are never reused or deleted. Run separately on
+manager. A host-wide lock prevents concurrent runs of this case; a busy lock,
+missing capabilities, or an existing bamai runtime cgroup produces a reported
+SKIP. The daemon owns cgroup cleanup. Any remaining group is preserved and fails
+the test, because its name alone does not prove ownership. Run separately on
 both hierarchies to establish v1 and v2 coverage. Storage and kubelet are disabled.
 
 After building, run this case from the integration directory:

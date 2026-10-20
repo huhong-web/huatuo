@@ -103,8 +103,9 @@ cgroup_css_require_environment() {
 	printf -v "$3" '%s' "${_css_notify_file}"
 }
 
-# Call once before startup, in the current shell. Only initially absent leaf
-# groups may be owned by the test; this check never creates or configures them.
+# Call once before startup, in the current shell. Reject existing leaf groups;
+# absence is only a precondition, not proof of ownership during later cleanup.
+# This check never creates or configures cgroups.
 huatuo_bamai_require_cgroup() {
 	local controller root
 	require_commands findmnt

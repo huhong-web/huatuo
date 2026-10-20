@@ -155,7 +155,9 @@ daemon cgroup 删除及日志中没有 error/panic/fatal。
 在隔离的 Linux 测试 VM 中运行，需要可写的 CPU、memory 控制器。
 同一套断言在 v1/hybrid 上读取 quota/period、memory 限额文件，在纯 v2 上读取
 `cpu.max`/`memory.max`；v2 还需要可访问的 systemd manager。
-缺少能力或已有 bamai runtime cgroup 时报告 SKIP，不复用或删除已有组。
+主机级锁防止该用例并发运行；锁已占用、缺少能力或已有 bamai runtime cgroup 时
+报告 SKIP。由 daemon 清理自身 cgroup；若仍有残留，则保留并使测试失败，
+因为仅凭组名无法确认归属。
 必须分别在两种层级上运行，才能确认 v1、v2 覆盖。用例禁用存储和 kubelet。
 
 构建完成后，进入 integration 目录单独运行：

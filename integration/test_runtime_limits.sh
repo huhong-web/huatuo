@@ -26,12 +26,18 @@ source "${ROOT_DIR}/integration/lib_cgroup.sh"
 readonly LIMITS_FIXTURES="${HUATUO_BAMAI_TEST_TMPDIR}/fixtures"
 readonly LIMITS_GATE="${LIMITS_FIXTURES}/dev/sda0"
 readonly LIMITS_PID_FILE="${HUATUO_BAMAI_TEST_TMPDIR}/huatuo-bamai.pid"
+readonly LIMITS_LOCK_FILE=/run/lock/huatuo-bamai-runtime-limits.lock
 # Bash does not export arrays to the child test process.
 readonly CURL_TIMEOUT=(--connect-timeout 2 --max-time 3)
 
-require_commands cmp curl ss awk mkfifo
+require_commands cmp curl ss awk mkfifo flock
 [[ -x "${HUATUO_BAMAI_BIN}" ]] || fatal "huatuo-bamai binary missing: ${HUATUO_BAMAI_BIN}"
 [[ -f "${HUATUO_BAMAI_TEST_FIXTURES}/dev/sda0" ]] || fatal "XFS device fixture is missing"
+
+# The daemon uses fixed cgroup names across all test workspaces.
+# Keep the lock file: unlinking it would let another run lock a different inode.
+exec {limits_lock_fd}> "${LIMITS_LOCK_FILE}" || skip "cannot open runtime limits lock: ${LIMITS_LOCK_FILE}"
+flock -n "${limits_lock_fd}" || skip "another runtime limits test holds ${LIMITS_LOCK_FILE}"
 
 LIMITS_PORT=$(allocate_available_port) || fatal "failed to allocate a bamai port"
 readonly LIMITS_PORT
@@ -50,19 +56,23 @@ cleanup() {
 	local status=$?
 	stop_and_wait_by_pid "${limits_observer_pid}" 1 || true
 	huatuo_bamai_stop || status=1
-	# A startup failure may precede the daemon's signal handler. Only initially
-	# absent leaf groups belong to this test; never remove an existing hierarchy.
-	if [[ ${RUNTIME_CGROUP_MODE} == v2 && -d "${RUNTIME_CGROUP_CPU_ROOT}${RUNTIME_CGROUP_PATH}" ]]; then
-		timeout --kill-after=1 10 systemctl stop huatuo-bamai.slice || status=1
-	fi
-	for limits_root in "${RUNTIME_CGROUP_ROOTS[@]}"; do
-		if [[ -d "${limits_root}${RUNTIME_CGROUP_PATH}" ]]; then
-			cgroup_delete "${limits_root}${RUNTIME_CGROUP_PATH}" || status=1
-		fi
-	done
+	# An initially absent group may now belong to another service. Let the
+	# daemon clean up its own resources; never stop or delete a group by name.
+	assert_limits_cgroups_removed || status=1
 	exit "${status}"
 }
 trap cleanup EXIT
+
+assert_limits_cgroups_removed() {
+	local root status=0
+	for root in "${RUNTIME_CGROUP_ROOTS[@]}"; do
+		if [[ -d "${root}${RUNTIME_CGROUP_PATH}" ]]; then
+			log_error "expected cgroup removal after shutdown; preserving unverified group: ${root}${RUNTIME_CGROUP_PATH}"
+			status=1
+		fi
+	done
+	return "${status}"
+}
 
 limits_locate_cgroup() {
 	local pid cpu_path memory_path
@@ -130,10 +140,7 @@ limits_stop() {
 	stop_gracefully_by_pid "${pid}" 20 || fatal "daemon did not exit gracefully"
 	rm -f "${LIMITS_PID_FILE}"
 
-	for limits_root in "${RUNTIME_CGROUP_ROOTS[@]}"; do
-		[[ ! -d "${limits_root}${RUNTIME_CGROUP_PATH}" ]] \
-			|| fatal "runtime cgroup remains after shutdown: ${limits_root}${RUNTIME_CGROUP_PATH}"
-	done
+	assert_limits_cgroups_removed || fatal "runtime cgroup remains after shutdown"
 
 	huatuo_bamai_log_check || fatal "daemon logged an error during startup or shutdown"
 	mv "${HUATUO_BAMAI_TEST_TMPDIR}/huatuo.log" "${HUATUO_BAMAI_TEST_TMPDIR}/huatuo-${phase}.log"
