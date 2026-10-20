@@ -30,8 +30,7 @@ readonly LIMITS_LOCK_FILE=/run/lock/huatuo-bamai-runtime-limits.lock
 # Bash does not export arrays to the child test process.
 readonly CURL_TIMEOUT=(--connect-timeout 2 --max-time 3)
 
-require_commands cmp curl ss awk mkfifo flock
-[[ -x "${HUATUO_BAMAI_BIN}" ]] || fatal "huatuo-bamai binary missing: ${HUATUO_BAMAI_BIN}"
+require_commands curl ss awk mkfifo flock
 [[ -f "${HUATUO_BAMAI_TEST_FIXTURES}/dev/sda0" ]] || fatal "XFS device fixture is missing"
 
 # The daemon uses fixed cgroup names across all test workspaces.
@@ -111,11 +110,20 @@ limits_match() {
 		'BEGIN {exit !(quota > 0 && period > 0 && quota == cpu * period)}'
 }
 
-limits_assert() {
+assert_limits() {
 	local phase=$1 cpu=$2 memory_mib=$3
+	limits_locate_cgroup || fatal "${phase}: expected daemon cgroup ${RUNTIME_CGROUP_PATH}; PID file: ${LIMITS_PID_FILE}"
 	wait_until 10 0.1 limits_match "${cpu}" "${memory_mib}" \
 		|| fatal "${phase}: CPU=${limits_quota}/${limits_period}, memory=${limits_memory}; expected ${cpu} cores, ${memory_mib} MiB"
 	log_info "${phase}: ${limits_cpu_path} CPU=${limits_quota}/${limits_period}, memory=${limits_memory} bytes"
+}
+
+assert_limits_restart() {
+	local previous_pid=$1 cpu=$2 memory_mib=$3
+	limits_pid=$(< "${LIMITS_PID_FILE}")
+	[[ ${limits_pid} != "${previous_pid}" ]] || fatal "replacement PID=${limits_pid} equals the stopped PID=${previous_pid}"
+	assert_limits running "${cpu}" "${memory_mib}"
+	huatuo_bamai_ready || fatal "replacement PID=${limits_pid} is not ready at ${HUATUO_BAMAI_METRICS_API}"
 }
 
 limits_observe_startup() {
@@ -128,8 +136,7 @@ limits_observe_startup() {
 		# The FIFO rendezvous does not order the parent's PID-file publication.
 		wait_until 10 0.1 test -s "${LIMITS_PID_FILE}" \
 			|| fatal "daemon PID file was not published at the startup gate: ${LIMITS_PID_FILE}"
-		limits_locate_cgroup || fatal "daemon reached the startup gate outside its runtime cgroup"
-		limits_assert startup "${cpu}" "${memory_mib}"
+		assert_limits startup "${cpu}" "${memory_mib}"
 	) || status=$?
 
 	# Release initialization even on assertion failure, allowing normal cleanup.
@@ -137,7 +144,7 @@ limits_observe_startup() {
 	return "${status}"
 }
 
-limits_stop() {
+assert_limits_shutdown() {
 	local phase=$1 pid
 	pid=$(< "${LIMITS_PID_FILE}")
 	stop_gracefully_by_pid "${pid}" 20 || fatal "daemon did not exit gracefully"
@@ -155,9 +162,10 @@ integration_huatuo_bamai_start : --region dev --procfs-prefix "${HUATUO_BAMAI_TE
 	--disable-storage --disable-kubelet
 
 limits_pid=$(< "${LIMITS_PID_FILE}")
-cmp -s "/proc/$$/cgroup" "/proc/${limits_pid}/cgroup" || fatal "default startup did not inherit cgroup membership"
+assert_eq "$(< "/proc/${limits_pid}/cgroup")" "$(< "/proc/$$/cgroup")" \
+	"inherited cgroup membership pid=${limits_pid}" || fatal "default startup did not inherit cgroup membership"
 log_info "default startup inherits the test process's cgroup"
-limits_stop inherited
+assert_limits_shutdown inherited
 
 # 2. Isolate the fixture so the startup gate never changes the shared input.
 cp -a "${HUATUO_BAMAI_TEST_FIXTURES}" "${LIMITS_FIXTURES}"
@@ -187,16 +195,12 @@ for limits_values in '0.75 1.25 512' '1.5 0.5 768'; do
 	wait "${limits_observer_pid}" || limits_observer_status=$?
 	limits_observer_pid=""
 	cat "${HUATUO_BAMAI_TEST_TMPDIR}/startup-${limits_startup_cpu}.log"
-	[[ ${limits_observer_status} -eq 0 ]] || fatal "startup limits check failed"
+	assert_eq "${limits_observer_status}" 0 "startup observer exit" || fatal "startup limits check failed"
 
 	# 7. A ready replacement must use the runtime limits in its own cgroup.
-	limits_pid=$(< "${LIMITS_PID_FILE}")
-	[[ ${limits_pid} != "${limits_old_pid}" ]] || fatal "restart reused the previous daemon PID"
-	limits_locate_cgroup || fatal "ready daemon is outside its runtime cgroup"
-	limits_assert running "${limits_cpu}" "${limits_memory_mib}"
-	huatuo_bamai_ready || fatal "daemon is not ready after applying runtime limits"
+	assert_limits_restart "${limits_old_pid}" "${limits_cpu}" "${limits_memory_mib}"
 
 	# 8. Require a successful graceful exit and cgroup removal before restarting.
-	limits_stop "${limits_startup_cpu}"
+	assert_limits_shutdown "${limits_startup_cpu}"
 	limits_old_pid=${limits_pid}
 done

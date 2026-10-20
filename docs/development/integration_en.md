@@ -160,7 +160,7 @@ The test fails if any expected metric is missing or mismatched.
 
 ### Daemon cgroup resource limits
 
-`test_runtime_limits.sh` checks that default startup inherits the test process's
+`test_node_runtime_limits.sh` checks that default startup inherits the test process's
 cgroup. With `--enable-cgroup`, it verifies membership through `/proc/PID/cgroup`
 and `cgroup.procs`, reads the startup and steady CPU limits, and checks the
 MiB-to-byte conversion for `MemoryLimitMiB`. It then changes all three Runtime
@@ -191,5 +191,5 @@ cd integration
 ```
 
 ```bash
-bash run.sh test_runtime_limits.sh
+bash run.sh test_node_runtime_limits.sh
 ```

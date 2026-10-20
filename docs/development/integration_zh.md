@@ -140,7 +140,7 @@ bash integration/run.sh
 
 ### Daemon cgroup 资源限额
 
-`test_runtime_limits.sh` 先验证默认启动继承测试进程的 cgroup。启用
+`test_node_runtime_limits.sh` 先验证默认启动继承测试进程的 cgroup。启用
 `--enable-cgroup` 后，通过 `/proc/PID/cgroup` 和 `cgroup.procs` 验证实际归属，
 读取启动、运行两阶段的 CPU 限额，并验证 `MemoryLimitMiB` 到字节的换算。
 正常停止后修改三个 Runtime 配置项，重启并重复验证，同时检查退出状态、
@@ -167,5 +167,5 @@ cd integration
 ```
 
 ```bash
-bash run.sh test_runtime_limits.sh
+bash run.sh test_node_runtime_limits.sh
 ```
