@@ -125,6 +125,9 @@ limits_observe_startup() {
 	# The parent's readiness/completion deadlines also bound this blocked open.
 	exec 3> "${LIMITS_GATE}"
 	(
+		# The FIFO rendezvous does not order the parent's PID-file publication.
+		wait_until 10 0.1 test -s "${LIMITS_PID_FILE}" \
+			|| fatal "daemon PID file was not published at the startup gate: ${LIMITS_PID_FILE}"
 		limits_locate_cgroup || fatal "daemon reached the startup gate outside its runtime cgroup"
 		limits_assert startup "${cpu}" "${memory_mib}"
 	) || status=$?
