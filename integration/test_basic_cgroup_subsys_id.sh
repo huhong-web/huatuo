@@ -50,7 +50,7 @@ subsys_id_cgroup_parent="${SUBSYS_ID_CGROUP_ROOT}/huatuo-subsys-id-${BASHPID}-${
 if ! mkdir "${subsys_id_cgroup_parent}" 2> "${HUATUO_BAMAI_TEST_TMPDIR}/cgroup-mkdir.log"; then
 	skip "cgroup hierarchy is not writable: ${SUBSYS_ID_CGROUP_ROOT}"
 fi
-if [[ -f "${subsys_id_cgroup_parent}/cgroup.subtree_control" ]]; then
+if [[ ${SUBSYS_ID_SYNC_SYMBOL} == memory_current_read ]]; then
 	# Enable memory so the child exposes memory.current.
 	echo +memory > "${subsys_id_cgroup_parent}/cgroup.subtree_control" \
 		|| skip "memory controller cannot be enabled in test cgroup"
