@@ -403,3 +403,13 @@ write_elasticsearch_config() {
     Path = ""
 EOF
 }
+
+# The test allocates the HTTP port before starting the Agent.
+write_bpf_no_leak_config() {
+	write_default_config
+	cat >> "${HUATUO_BAMAI_TEST_TMPDIR}/bamai.conf" << EOF
+
+[HTTPServer]
+    ListenAddress = "127.0.0.1:${BPF_LEAK_PORT}"
+EOF
+}
