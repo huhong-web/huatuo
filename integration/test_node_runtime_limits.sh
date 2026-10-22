@@ -30,7 +30,7 @@ readonly LIMITS_LOCK_FILE=/run/lock/huatuo-bamai-runtime-limits.lock
 # Bash does not export arrays to the child test process.
 readonly CURL_TIMEOUT=(--connect-timeout 2 --max-time 3)
 
-require_commands curl ss awk mkfifo flock
+require_commands curl ss awk mkfifo flock dd
 [[ -f "${HUATUO_BAMAI_TEST_FIXTURES}/dev/sda0" ]] || fatal "XFS device fixture is missing"
 
 # The daemon uses fixed cgroup names across all test workspaces.
@@ -140,7 +140,11 @@ limits_observe_startup() {
 	) || status=$?
 
 	# Release initialization even on assertion failure, allowing normal cleanup.
-	cat "${HUATUO_BAMAI_TEST_FIXTURES}/dev/sda0" >&3 || return 1
+	# XFS closes after reading its superblock; write the 512-byte fixture once.
+	if ! dd if="${HUATUO_BAMAI_TEST_FIXTURES}/dev/sda0" bs=512 count=1 status=none >&3; then
+		log_error "failed to write XFS fixture to startup FIFO: ${LIMITS_GATE}"
+		return 1
+	fi
 	return "${status}"
 }
 
