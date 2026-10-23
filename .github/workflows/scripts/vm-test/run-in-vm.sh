@@ -15,7 +15,7 @@
 # limitations under the License.
 #
 
-# Purpose: Prepare the guest test environment and run Huatuo e2e tests in /mnt/host.
+# Purpose: Prepare the guest and run PR #1288's dropwatch test in /mnt/host.
 # Caller: qemu-2-run-in-vm.sh streams this helper to the guest over SSH.
 # Environment:
 # - HOME: Used to add the user's Go binary directory to PATH.
@@ -23,7 +23,7 @@
 # Parameters:
 # - None.
 # Examples:
-# - run-in-vm.sh  # prepare the guest and run make e2e
+# - run-in-vm.sh  # prepare the guest and run the dropwatch rate-limit test
 
 set -euo pipefail
 
@@ -237,10 +237,13 @@ pwd
 ls -alh .
 git config --global --add safe.directory /mnt/host
 
-# This is the single entry point for all guest test targets.
-vm_log '⬅️⬅️⬅️ Running tests...'
+# This temporary CI branch keeps PR #1288 unchanged and skips unrelated suites.
+vm_log 'Building dropwatch and the pprof test tool...'
 
-make install-tools
-make test
+make build APP_CMD_SUBDIRS=cmd/dropwatch
+go build -o _output/tools/pprof-tool ./build/pprof-tool
 
-vm_log '✅✅✅ Tests passed.'
+vm_log 'Running test_dropwatch_ratelimit.sh...'
+bash integration/run.sh test_dropwatch_ratelimit.sh
+
+vm_log 'Dropwatch test run completed; see the integration PASS/SKIP/FAIL summary.'
