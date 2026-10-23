@@ -17,10 +17,128 @@ package toolstream
 import (
 	"context"
 	"errors"
+	"fmt"
+	"net"
 	"testing"
+	"time"
 
 	"github.com/ccfos/huatuo/internal/toolstream/transport"
 )
+
+func TestEventWriterCloseAfterCanceledRelease(t *testing.T) {
+	closeErr := errors.New("release connection failed")
+	for _, test := range []struct {
+		name     string
+		closeErr error
+		wantErr  error
+	}{
+		{
+			name:     "transport already closed the connection",
+			closeErr: net.ErrClosed,
+		},
+		{
+			name:     "wrapped already closed connection",
+			closeErr: fmt.Errorf("close unix connection: %w", net.ErrClosed),
+		},
+		{
+			name:     "real release failure remains visible",
+			closeErr: closeErr,
+			wantErr:  closeErr,
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			ctx, cancel := context.WithCancel(t.Context())
+			cancel()
+			closeCalls := 0
+			writer := &EventWriter{
+				runCtx:   ctx,
+				sendCtx:  context.WithoutCancel(ctx),
+				finalCtx: ctx,
+				closeClient: func() error {
+					closeCalls++
+					return test.closeErr
+				},
+				stopCancellation: func() bool { return true },
+				cancelFinal:      func() {},
+			}
+			for range 2 {
+				if err := writer.Close(); !errors.Is(err, test.wantErr) {
+					t.Fatalf("Close = %v, want %v", err, test.wantErr)
+				}
+			}
+			if closeCalls != 1 {
+				t.Fatalf("connection release calls = %d, want 1", closeCalls)
+			}
+		})
+	}
+}
+
+func TestEventWriterCanceledEndTimeoutIgnoresDuplicateClose(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	finalCtx, cancelFinal := context.WithTimeout(context.WithoutCancel(ctx), time.Second)
+	defer cancelFinal()
+	sentEnd := false
+	writer := &EventWriter{
+		runCtx:      ctx,
+		sendCtx:     context.WithoutCancel(ctx),
+		finalCtx:    finalCtx,
+		cancelFinal: cancelFinal,
+		sendFrame: func(sendCtx context.Context, event any, options SendOptions) error {
+			if event != nil || !options.End {
+				t.Fatal("Close did not send an End-only frame")
+			}
+			sentEnd = true
+			<-sendCtx.Done()
+			return sendCtx.Err()
+		},
+		// The transport deadline may release the connection before its owner.
+		closeClient:      func() error { return net.ErrClosed },
+		stopCancellation: func() bool { return true },
+	}
+	for range 2 {
+		if err := writer.Close(); err != nil {
+			t.Fatalf("Close after canceled End timeout: %v", err)
+		}
+	}
+	if !sentEnd {
+		t.Fatal("End timeout was not exercised")
+	}
+}
+
+func TestEventWriterCloseKeepsRunDeadline(t *testing.T) {
+	ctx, cancel := context.WithTimeout(t.Context(), 50*time.Millisecond)
+	defer cancel()
+	closeErr := errors.New("close connection failed")
+	closeCalls := 0
+	writer := &EventWriter{
+		runCtx:  ctx,
+		sendCtx: context.WithoutCancel(ctx),
+		sendFrame: func(sendCtx context.Context, event any, options SendOptions) error {
+			if event != nil || !options.End {
+				t.Fatal("Close did not send an End-only frame")
+			}
+			wantDeadline, _ := ctx.Deadline()
+			gotDeadline, ok := sendCtx.Deadline()
+			if !ok || !gotDeadline.Equal(wantDeadline) {
+				t.Fatalf("End deadline = %v, want run deadline %v", gotDeadline, wantDeadline)
+			}
+			<-sendCtx.Done()
+			return sendCtx.Err()
+		},
+		closeClient: func() error {
+			closeCalls++
+			return closeErr
+		},
+		stopCancellation: func() bool { return true },
+	}
+	if err := writer.Close(); !errors.Is(err, context.DeadlineExceeded) || !errors.Is(err, closeErr) {
+		t.Fatalf("Close = %v, want deadline and connection close errors", err)
+	}
+	if closeCalls != 1 {
+		t.Fatalf("connection close calls = %d, want 1", closeCalls)
+	}
+}
 
 func TestRequestsContinueAfterFrameFailures(t *testing.T) {
 	server, err := NewServer(t.TempDir() + "/requests.sock")
