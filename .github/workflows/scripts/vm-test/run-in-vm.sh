@@ -240,7 +240,9 @@ git config --global --add safe.directory /mnt/host
 # This is the single entry point for all guest test targets.
 vm_log '⬅️⬅️⬅️ Running tests...'
 
-make install-tools
-make test
+# This fork-only gate runs the candidate's unchanged dropwatch test.
+make build APP_CMD_SUBDIRS=cmd/dropwatch
+go build -o _output/tools/pprof-tool ./build/pprof-tool
+bash integration/run.sh test_dropwatch_ratelimit.sh
 
 vm_log '✅✅✅ Tests passed.'
