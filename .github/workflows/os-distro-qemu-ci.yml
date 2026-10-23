@@ -17,6 +17,21 @@ on:
         type: string
         required: true
         default: ubuntu24.04
+      phase:
+        description: Heap measurement phase
+        type: choice
+        default: calibration
+        options:
+          - calibration
+          - validation
+      rounds:
+        description: Serial dropwatch runs per fresh VM
+        type: number
+        default: 20
+      heap_budget_mib:
+        description: Heap ceiling in MiB (0 for calibration only)
+        type: number
+        default: 0
       debug_mode:
         description: 'Debug VM: retain when'
         type: choice
@@ -73,5 +88,8 @@ jobs:
     uses: ./.github/workflows/os-distro-qemu-test-reusable.yml
     with:
       os: ${{ inputs.os || 'all' }}
+      phase: ${{ inputs.phase || 'calibration' }}
+      rounds: ${{ inputs.rounds || 20 }}
+      heap_budget_mib: ${{ inputs.heap_budget_mib || 0 }}
       debug_mode: ${{ inputs.debug_mode || 'Disabled' }}
       debug_timeout_minutes: ${{ inputs.debug_timeout_minutes || '90' }}

@@ -240,7 +240,9 @@ git config --global --add safe.directory /mnt/host
 # This is the single entry point for all guest test targets.
 vm_log '⬅️⬅️⬅️ Running tests...'
 
-make install-tools
-make test
+# This fork-only branch measures the unchanged dropwatch workload repeatedly.
+make build APP_CMD_SUBDIRS=cmd/dropwatch
+go build -o _output/tools/pprof-tool ./build/pprof-tool
+bash .github/workflows/scripts/measure-dropwatch-heap.sh
 
 vm_log '✅✅✅ Tests passed.'

@@ -8,6 +8,15 @@ on:
         type: string
         required: false
         default: all
+      phase:
+        type: string
+        default: calibration
+      rounds:
+        type: number
+        default: 20
+      heap_budget_mib:
+        type: number
+        default: 0
       debug_mode:
         description: 'Debug VM: retain when'
         type: string
@@ -97,7 +106,15 @@ jobs:
         timeout-minutes: 20
         env:
           VM_IMAGE_REF: ${{ matrix.image }}
+          HEAP_PHASE: ${{ inputs.phase }}
+          HEAP_ROUNDS: ${{ inputs.rounds }}
+          HEAP_BUDGET_MIB: ${{ inputs.heap_budget_mib }}
         run: |
+          jq -n --arg phase "$HEAP_PHASE" --argjson rounds "$HEAP_ROUNDS" \
+            --argjson heap_budget_mib "$HEAP_BUDGET_MIB" \
+            --arg vm_image "$VM_IMAGE_REF" \
+            '{phase: $phase, rounds: $rounds, heap_budget_mib: $heap_budget_mib, vm_image: $vm_image}' \
+            > .github/workflows/scripts/vm-test/heap-measurement.json
           .github/workflows/scripts/qemu-1-start-vm.sh \
             "${{ matrix.arch }}" "${{ matrix.os }}"
 
@@ -129,6 +146,25 @@ jobs:
         timeout-minutes: 90
         run: |
           .github/workflows/scripts/qemu-2-run-in-vm.sh
+
+      - name: Collect heap measurements
+        if: always() && steps.start-vm.outcome == 'success'
+        timeout-minutes: 5
+        run: |
+          source "$VM_ENV_FILE"
+          mkdir -p _output/dropwatch-heap
+          printf -v rsync_ssh 'ssh -i %q -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null' "$VM_SSH_KEY"
+          rsync -rlt --chmod=Du=rwx,Dgo=rx,Fu=rw,Fgo=r -e "$rsync_ssh" \
+            "root@$VM_IP:/mnt/host/_output/dropwatch-heap/" _output/dropwatch-heap/
+
+      - name: Upload heap measurements
+        if: always() && steps.start-vm.outcome == 'success'
+        uses: actions/upload-artifact@v4
+        with:
+          name: dropwatch-heap-${{ inputs.phase }}-${{ matrix.os }}-${{ matrix.arch }}
+          path: _output/dropwatch-heap/
+          if-no-files-found: error
+          retention-days: 14
 
       - name: 'Debug VM: Start session after test'
         id: upterm-after

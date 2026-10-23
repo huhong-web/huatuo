@@ -55,7 +55,7 @@ readonly DROPWATCH_EXPECTED_MAX=$((DROPWATCH_RATE * (DROPWATCH_DURATION + 1))) #
 readonly DROPWATCH_CPU_LIMIT_PERCENT=5                                         # One fully occupied core is 100%.
 # Ubuntu 26.04 CI reported 61.7-69.8 MiB with this workload. Use a coarse
 # heap ceiling with headroom above those observations, not a percentage bound.
-readonly DROPWATCH_HEAP_LIMIT_BYTES=$((96 * 1024 * 1024))
+readonly DROPWATCH_HEAP_LIMIT_BYTES=${DROPWATCH_HEAP_LIMIT_BYTES:-$((96 * 1024 * 1024))}
 readonly DROPWATCH_GOROUTINE_LIMIT=16
 readonly DROPWATCH_PPROF_ADDRESS="127.0.0.1:6000"
 readonly DROPWATCH_PPROF_DIR="${TOOL_WORK_DIR}/pprof"
@@ -82,6 +82,13 @@ assert_dropwatch_resource_budget() {
 	local result="${TOOL_WORK_DIR}/resources.json"
 	actual=$(jq -c --arg metric "${metric}" '.[$metric]' "${result}") \
 		|| fatal "cannot read dropwatch ${metric}: ${result}"
+	if [[ ${metric} == heap_inuse_bytes && ${limit} -eq 0 ]]; then
+		# Calibration must record large values without censoring the distribution.
+		jq -e 'type == "number" and . >= 0' <<< "${actual}" > /dev/null \
+			|| fatal "calibration requires a valid heap measurement: ${actual}"
+		log_info "heap calibration: upper budget disabled"
+		return
+	fi
 	jq -e --argjson limit "${limit}" --argjson minimum "${minimum}" \
 		'type == "number" and . >= $minimum and . <= $limit' \
 		<<< "${actual}" > /dev/null \

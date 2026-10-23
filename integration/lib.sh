@@ -502,6 +502,11 @@ integration_test_exit() {
 	huatuo_bamai_stop "${test_workspace}" || cleanup_status=1
 	[[ ${cleanup_status} -eq 0 ]] || exit_code=1
 
+	# Preserve successful profiles as well as failures on this calibration branch.
+	if [[ -n "${INTEGRATION_ARTIFACTS_DIR:-}" ]]; then
+		cp -a -- "${test_workspace}" "${INTEGRATION_ARTIFACTS_DIR}/workspace" || return 1
+	fi
+
 	if [[ ${exit_code} -eq 0 || ${exit_code} -eq 77 ]]; then
 		rm -rf -- "${test_workspace}" || return 1
 		return 0
