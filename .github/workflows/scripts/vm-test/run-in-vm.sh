@@ -15,7 +15,7 @@
 # limitations under the License.
 #
 
-# Purpose: Prepare the guest test environment and run Huatuo e2e tests in /mnt/host.
+# Purpose: Run only the dropwatch device-filter integration test in /mnt/host.
 # Caller: qemu-2-run-in-vm.sh streams this helper to the guest over SSH.
 # Environment:
 # - HOME: Used to add the user's Go binary directory to PATH.
@@ -23,7 +23,7 @@
 # Parameters:
 # - None.
 # Examples:
-# - run-in-vm.sh  # prepare the guest and run make e2e
+# - run-in-vm.sh  # build dropwatch and verify device filtering
 
 set -euo pipefail
 
@@ -237,10 +237,18 @@ pwd
 ls -alh .
 git config --global --add safe.directory /mnt/host
 
-# This is the single entry point for all guest test targets.
-vm_log '⬅️⬅️⬅️ Running tests...'
+# This fork-only CI branch validates the test without running unrelated suites.
+vm_log 'Building dropwatch for device-filter validation...'
 
-make install-tools
-make test
+make build APP_CMD_SUBDIRS=cmd/dropwatch
 
-vm_log '✅✅✅ Tests passed.'
+vm_log 'Running only test_dropwatch_device_filter.sh...'
+device_filter_ci_log=/tmp/huatuo-device-filter-ci.log
+bash integration/run.sh test_dropwatch_device_filter.sh | tee "$device_filter_ci_log"
+if ! grep -Fq 'PASS: test_dropwatch_device_filter.sh (1/1)' "$device_filter_ci_log" \
+	|| ! grep -Fq 'summary: total=1 passed=1 skipped=0 failed=0' "$device_filter_ci_log"; then
+	vm_log_error 'Device-filter validation must PASS exactly one test with no skips.'
+	exit 1
+fi
+
+vm_log 'Device-filter integration test passed without skips.'
