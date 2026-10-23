@@ -53,7 +53,9 @@ readonly DROPWATCH_TARGET_IP="127.0.0.99"
 readonly DROPWATCH_TARGET_PORT=9999
 readonly DROPWATCH_EXPECTED_MAX=$((DROPWATCH_RATE * (DROPWATCH_DURATION + 1))) # +1s headroom for the first burst
 readonly DROPWATCH_CPU_LIMIT_PERCENT=5                                         # One fully occupied core is 100%.
-readonly DROPWATCH_HEAP_LIMIT_BYTES=$((64 * 1024 * 1024))
+# Ubuntu 26.04 CI reported 61.7-69.8 MiB with this workload. Use a coarse
+# heap ceiling with headroom above those observations, not a percentage bound.
+readonly DROPWATCH_HEAP_LIMIT_BYTES=$((96 * 1024 * 1024))
 readonly DROPWATCH_GOROUTINE_LIMIT=16
 readonly DROPWATCH_PPROF_ADDRESS="127.0.0.1:6000"
 readonly DROPWATCH_PPROF_DIR="${TOOL_WORK_DIR}/pprof"
