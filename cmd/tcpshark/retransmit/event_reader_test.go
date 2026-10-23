@@ -122,6 +122,19 @@ func TestWriteRetransmitEventsReturnsOutputError(t *testing.T) {
 	}
 }
 
+func TestWriteRetransmitEventsTreatsCanceledSocketAsNormalStop(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	reader := &retransmitReaderStub{read: func(any) error { return nil }}
+	err := writeRetransmitEvents(ctx, reader.readInto, testEventWriter(func(*types.TCPRetransmitTracing) error {
+		cancel()
+		return errors.Join(errors.New("socket closed"), ctx.Err())
+	}), "tools")
+	if err != nil {
+		t.Fatalf("writeRetransmitEvents canceled output = %v, want normal stop", err)
+	}
+}
+
 // The batch includes one terminal writer error and its operation wrapper.
 func BenchmarkWriteRetransmitEvents(b *testing.B) {
 	stop := errors.New("batch complete")
