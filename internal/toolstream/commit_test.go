@@ -17,6 +17,7 @@ package toolstream_test
 import (
 	"context"
 	"errors"
+	"net"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -26,6 +27,177 @@ import (
 
 	"github.com/ccfos/huatuo/internal/toolstream"
 )
+
+func TestEventWriterCancellationUnblocksBackpressure(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "events.sock")
+	listener, err := net.Listen("unix", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+	client, err := toolstream.NewClient(&toolstream.ClientOptions{
+		SockPath:    path,
+		ServiceName: "events",
+		Version:     "test",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	peer, err := listener.Accept()
+	if err != nil {
+		_ = client.Close()
+		t.Fatal(err)
+	}
+	defer peer.Close()
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	writer := toolstream.NewEventWriter(ctx, client)
+	defer writer.Close()
+	finished := make(chan error, 1)
+	go func() { finished <- writer.Write(strings.Repeat("x", 1<<20)) }()
+	select {
+	case err := <-finished:
+		t.Fatalf("Write completed without a reader: %v", err)
+	case <-time.After(50 * time.Millisecond):
+	}
+	cancel()
+	select {
+	case err := <-finished:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("Write = %v, want cancellation", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("cancellation did not interrupt Write")
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatalf("Close after cancellation: %v", err)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatalf("repeated Close: %v", err)
+	}
+	if err := client.Close(); !errors.Is(err, net.ErrClosed) {
+		t.Fatalf("client connection remained open: %v", err)
+	}
+}
+
+func TestEventWriterCloseSendsEnd(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "events.sock")
+	server, err := toolstream.NewServer(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ended := make(chan struct{}, 1)
+	toolstream.Register(server, "events", func(_ context.Context, request *toolstream.Request[string]) error {
+		if request.End {
+			ended <- struct{}{}
+		}
+		return nil
+	})
+	if err := server.Start(); err != nil {
+		t.Fatal(err)
+	}
+	defer server.Close()
+	client, err := toolstream.NewClient(&toolstream.ClientOptions{
+		SockPath:    path,
+		ServiceName: "events",
+		Version:     "test",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	writer := toolstream.NewEventWriter(t.Context(), client)
+	if err := writer.Write("event"); err != nil {
+		t.Fatal(err)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-ended:
+	case <-time.After(2 * time.Second):
+		t.Fatal("Close did not send End")
+	}
+	if err := client.Close(); !errors.Is(err, net.ErrClosed) {
+		t.Fatalf("Close did not release connection: %v", err)
+	}
+}
+
+func TestEventWriterEndFailureStillClosesConnection(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "events.sock")
+	listener, err := net.Listen("unix", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+	client, err := toolstream.NewClient(&toolstream.ClientOptions{
+		SockPath:    path,
+		ServiceName: "events",
+		Version:     "test",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	peer, err := listener.Accept()
+	if err != nil {
+		_ = client.Close()
+		t.Fatal(err)
+	}
+	if err := peer.Close(); err != nil {
+		t.Fatal(err)
+	}
+	writer := toolstream.NewEventWriter(t.Context(), client)
+	closeErr := writer.Close()
+	if closeErr == nil {
+		t.Fatal("Close accepted an End frame after peer closed")
+	}
+	if err := writer.Close(); !errors.Is(err, closeErr) {
+		t.Fatalf("repeated Close = %v, want original error %v", err, closeErr)
+	}
+	if err := client.Close(); !errors.Is(err, net.ErrClosed) {
+		t.Fatalf("failed End did not release connection: %v", err)
+	}
+}
+
+func BenchmarkEventWriter(b *testing.B) {
+	for _, mode := range []string{"background send", "run cancellation"} {
+		b.Run(mode, func(b *testing.B) {
+			path := filepath.Join(b.TempDir(), "events.sock")
+			server, err := toolstream.NewServer(path)
+			if err != nil {
+				b.Fatal(err)
+			}
+			toolstream.Register(server, "events", func(context.Context, *toolstream.Request[string]) error {
+				return nil
+			})
+			if err := server.Start(); err != nil {
+				b.Fatal(err)
+			}
+			defer server.Close()
+			client, err := toolstream.NewClient(&toolstream.ClientOptions{
+				SockPath:    path,
+				ServiceName: "events",
+				Version:     "benchmark",
+			})
+			if err != nil {
+				b.Fatal(err)
+			}
+			ctx, cancel := context.WithCancel(b.Context())
+			defer cancel()
+			writer := toolstream.NewEventWriter(ctx, client)
+			defer writer.Close()
+			write := writer.Write
+			if mode == "background send" {
+				write = func(event any) error { return client.Send(context.Background(), event, toolstream.SendOptions{}) }
+			}
+			b.ReportAllocs()
+			for b.Loop() {
+				if err := write("event payload"); err != nil {
+					b.Fatal(err)
+				}
+			}
+		})
+	}
+}
 
 func TestCommitAcknowledgesAllWindowsAndPublication(t *testing.T) {
 	for _, failure := range []string{"", "window", "publish", "end"} {

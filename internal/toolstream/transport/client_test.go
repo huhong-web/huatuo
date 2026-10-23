@@ -112,3 +112,32 @@ func TestSendCancellationInterruptsBlockedWrite(t *testing.T) {
 		t.Fatal("cancellation did not unblock Send")
 	}
 }
+
+func TestSendEndDeadlineInterruptsBlockedWrite(t *testing.T) {
+	local, remote := net.Pipe()
+	defer local.Close()
+	defer remote.Close()
+	client := &Client{
+		encoder: capnp.NewEncoder(local),
+		conn:    local,
+	}
+	ctx, cancel := context.WithTimeout(t.Context(), 100*time.Millisecond)
+	defer cancel()
+	done := make(chan error, 1)
+	go func() { done <- client.Send(ctx, nil, SendOptions{End: true}) }()
+	if err := remote.SetReadDeadline(time.Now().Add(time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	// Leave the End frame partially written, just as a stalled receiver would.
+	if _, err := io.ReadFull(remote, make([]byte, 1)); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case err := <-done:
+		if !errors.Is(err, context.DeadlineExceeded) {
+			t.Fatalf("End send = %v, want deadline", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("deadline did not interrupt End send")
+	}
+}

@@ -39,9 +39,13 @@ func runRetransmitDropCorrelation(
 		return err
 	}
 	defer func() {
+		settleErr := session.emitResults(correlator.drainRetransmits(time.Now()))
+		if ctx.Err() != nil && errors.Is(settleErr, ctx.Err()) {
+			settleErr = nil
+		}
 		returnErr = errors.Join(
 			returnErr,
-			session.emitResults(correlator.drainRetransmits(time.Now())),
+			settleErr,
 		)
 	}()
 
@@ -81,6 +85,9 @@ func runRetransmitDropCorrelation(
 			return nil
 		}
 		if err := session.emitResults(results); err != nil {
+			if ctx.Err() != nil && errors.Is(err, ctx.Err()) {
+				return nil
+			}
 			return err
 		}
 	}

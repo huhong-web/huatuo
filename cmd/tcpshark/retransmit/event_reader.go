@@ -72,6 +72,9 @@ func writeRetransmitEvents(
 			return err
 		}
 		if err := sink.Write(tracing); err != nil {
+			if ctx.Err() != nil && errors.Is(err, ctx.Err()) {
+				return nil
+			}
 			return fmt.Errorf("write event: %w", err)
 		}
 	}
