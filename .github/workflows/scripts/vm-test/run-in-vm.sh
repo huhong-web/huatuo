@@ -15,7 +15,7 @@
 # limitations under the License.
 #
 
-# Purpose: Prepare the guest test environment and run Huatuo e2e tests in /mnt/host.
+# Purpose: Prepare the guest test environment and run the fork-only event-output/DCMI gate in /mnt/host.
 # Caller: qemu-2-run-in-vm.sh streams this helper to the guest over SSH.
 # Environment:
 # - HOME: Used to add the user's Go binary directory to PATH.
@@ -23,7 +23,7 @@
 # Parameters:
 # - None.
 # Examples:
-# - run-in-vm.sh  # prepare the guest and run make e2e
+# - run-in-vm.sh  # prepare the guest and run the targeted fork gate
 
 set -euo pipefail
 
@@ -240,7 +240,23 @@ git config --global --add safe.directory /mnt/host
 # This is the single entry point for all guest test targets.
 vm_log '⬅️⬅️⬅️ Running tests...'
 
-make install-tools
-make test
+# Fork-only gate: run the changed event-stream and Ascend contracts.
+make build APP_CMD_SUBDIRS="cmd/dropwatch cmd/tcpshark cmd/iotracing"
+go test -race -v -count=1 ./internal/toolstream/... ./cmd/dropwatch ./cmd/tcpshark/retransmit ./cmd/iotracing ./pkg/metric | tee /tmp/event-output-tests.log
+go test -race -v -count=1 ./core/metrics -run '^TestAscend' | tee /tmp/ascend-tests.log
+if grep -E -- '--- SKIP:|\[no tests to run\]|\[no test files\]' /tmp/event-output-tests.log /tmp/ascend-tests.log; then
+	vm_log_error 'required regression tests were skipped or not selected'
+	exit 1
+fi
+for package in internal/toolstream internal/toolstream/transport cmd/dropwatch cmd/tcpshark/retransmit cmd/iotracing pkg/metric; do
+	grep -Eq "^ok[[:space:]]+github.com/ccfos/huatuo/${package}[[:space:]]" /tmp/event-output-tests.log
+done
+for regression in TestEventWriterCancellationUnblocksBackpressure TestSendEndDeadlineInterruptsBlockedWrite TestSocketWriterCancellationUnblocksBackpressure TestWriteToolstreamReportPublishesSnapshotAfterCollectionCancellation TestWriteToolstreamReportDeadlineUnblocksBackpressure TestSocketWriterPreservesCorrelationResult TestPrometheusMetric; do
+	grep -Eq "^--- PASS: ${regression}( |$)" /tmp/event-output-tests.log
+done
+grep -Eq '^ok[[:space:]]+github.com/ccfos/huatuo/core/metrics[[:space:]]' /tmp/ascend-tests.log
+grep -Eq '^--- PASS: TestAscendCollectorUpdateRecovery( |$)' /tmp/ascend-tests.log
+bash integration/run.sh test_dropwatch_output_cancellation.sh | tee /tmp/event-output-integration.log
+grep -q 'summary: total=1 passed=1 skipped=0 failed=0' /tmp/event-output-integration.log
 
 vm_log '✅✅✅ Tests passed.'
