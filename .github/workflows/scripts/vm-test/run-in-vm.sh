@@ -15,7 +15,7 @@
 # limitations under the License.
 #
 
-# Purpose: Prepare the guest test environment and run Huatuo e2e tests in /mnt/host.
+# Purpose: Prepare the guest and run the selected PR1480 integration tests.
 # Caller: qemu-2-run-in-vm.sh streams this helper to the guest over SSH.
 # Environment:
 # - HOME: Used to add the user's Go binary directory to PATH.
@@ -23,7 +23,7 @@
 # Parameters:
 # - None.
 # Examples:
-# - run-in-vm.sh  # prepare the guest and run make e2e
+# - run-in-vm.sh  # prepare the guest and run the two selected integration cases
 
 set -euo pipefail
 
@@ -221,6 +221,14 @@ install_temporary_go_tools() {
 	done
 }
 
+assert_selected_test_passed() {
+	local test_name=$1 status=$2 log_file=$3
+	if ((status != 0)) || ! grep -Fq 'summary: total=1 passed=1 skipped=0 failed=0' "${log_file}"; then
+		vm_log_error "${test_name}: expected one pass and no skips; exit=${status}, log=${log_file}"
+		return 1
+	fi
+}
+
 configure_proxy
 grow_root_filesystem
 print_sys_info
@@ -240,7 +248,19 @@ git config --global --add safe.directory /mnt/host
 # This is the single entry point for all guest test targets.
 vm_log '⬅️⬅️⬅️ Running tests...'
 
-make install-tools
-make test
+# Keep this fork-only selection separate from the unchanged candidate tests.
+make build APP_CMD_SUBDIRS='cmd/dropwatch cmd/huatuo-bamai'
+go build -o _output/tools/pprof-tool ./build/pprof-tool
+
+selected_tests_status=0
+for test_name in test_dropwatch_ratelimit.sh test_basic_storage_opensearch_elasticsearch.sh; do
+	test_log="_output/${test_name%.sh}.log"
+	test_status=0
+	# Bound each case so a stuck first case does not prevent the second run.
+	timeout --kill-after=30s 30m bash integration/run.sh "${test_name}" > "${test_log}" 2>&1 || test_status=$?
+	cat "${test_log}"
+	assert_selected_test_passed "${test_name}" "${test_status}" "${test_log}" || selected_tests_status=1
+done
+((selected_tests_status == 0)) || exit "${selected_tests_status}"
 
 vm_log '✅✅✅ Tests passed.'
