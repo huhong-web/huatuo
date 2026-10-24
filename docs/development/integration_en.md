@@ -172,6 +172,32 @@ Network tests can source `integration/lib_namespace.sh` after `lib.sh`:
 
 Tests requiring raw packets reuse `integration/testdata/test_packet_sender.py`; extend it for new scenarios. It requires Python 3 and raw socket privileges and supports `ipv4-options` (TCP/UDP EOL options, including maximum IHL) and `icmpv6-echo`. Use each subcommand's `--help` for address, port, or Echo identifier parameters. The program sends packets every 100 ms and exits normally on SIGTERM. Shell cases manage namespaces, drop rules, assertions, logs, and process cleanup. Workloads needing real TCP connections continue to use `testdata/tcp_server.py`.
 
+### Network hardware drop metrics
+
+`test_metrics_netdev_hw.sh` runs the real daemon, ethtool discovery and BPF
+software-drop snapshots. It checks driver/device labels, the counter type and
+device exclusion through `/metrics`, including its `text/plain` response type.
+An observed per-device BPF map snapshot is required even when the counter is
+zero. Device exclusion also requires the discovery decision for each previously
+accepted NIC, so an empty scrape before
+BPF publication cannot satisfy the exclusion check.
+
+The case creates its own `netdevsim` device through `integration/lib_net.sh`,
+which also owns the lifecycle used by `test_dropwatch_netdevsim.sh`. It first
+reads live sysfs statistics and requires a real BPF map entry for the device.
+It then replaces only the two RX statistics files with controlled values,
+while retaining the live `carrier_down_count` link that triggers the BPF hook.
+The test verifies counters of 0, 7, 100 and 0, followed by DeviceList exclusion.
+The device is deleted on exit; physical NICs are not selected or modified.
+
+Missing commands (`curl`, `ss`, `devlink`, `jq`), the
+`carrier_down_count_show` probe or netdevsim device-creation capability cause
+an explicit skip. `modprobe` is required only when the module is not loaded;
+`ip` is required only by the dropwatch scenario. A skip does not establish kernel
+support. Unit tests cover physical driver selection, selection failures, counter precedence, consecutive
+nonzero BPF snapshots, software-drop subtraction and underflow boundaries.
+The integration test does not establish physical-driver compatibility.
+
 ## Add a Metric Test
 
 ### 1. Prepare Simulated Data

@@ -192,6 +192,27 @@ SCSI 使用 `TEST_SCSI_DEVICE=sdb`。这两类用例分别需要 `nvme-cli` 和
 Shell 用例负责命名空间、丢包规则、断言、日志和进程清理。
 需要真实 TCP 连接的负载继续使用 `testdata/tcp_server.py`。
 
+### 网卡硬件丢包指标
+
+`test_metrics_netdev_hw.sh` 运行真实 daemon、ethtool 设备发现和 BPF 软件丢包快照，
+通过 `/metrics` 验证 `text/plain` 响应类型、driver/device 标签、counter 类型及设备排除配置。
+即使计数为零，也必须观察到该设备的 BPF map 快照。设备排除还要求观察到先前
+已接受网卡的筛选决策，避免将 BPF 尚未发布时的空响应误判为排除成功。
+
+用例通过 `integration/lib_net.sh` 创建独立的 `netdevsim` 设备，
+与 `test_dropwatch_netdevsim.sh` 复用设备生命周期。先读取真实 sysfs 统计，
+并要求观察到该设备的真实 BPF map 条目；随后仅将两个 RX 统计文件替换为可控值，
+保留真实 `carrier_down_count` 链接以触发 BPF 探针。
+依次验证指标值 0、7、100、0，再验证 DeviceList 排除。退出时删除本用例创建的设备，
+不选择或修改物理网卡。
+
+缺少所需命令（`curl`、`ss`、`devlink`、`jq`）、
+`carrier_down_count_show` 探针或 netdevsim 设备创建能力时明确跳过。
+仅在模块尚未加载时要求 `modprobe`；仅 dropwatch 场景要求 `ip`。
+跳过不代表已经验证内核支持。单测覆盖物理驱动选择、设备选择失败、计数优先级、
+连续非零 BPF 快照、扣除软件丢包及下溢边界。
+该集成测试不证明物理驱动兼容性。
+
 ## 新增指标测试
 
 ### 1. 准备模拟数据
