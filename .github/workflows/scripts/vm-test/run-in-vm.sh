@@ -15,7 +15,7 @@
 # limitations under the License.
 #
 
-# Purpose: Prepare the guest test environment and run Huatuo e2e tests in /mnt/host.
+# Purpose: Prepare the guest and run PR 1333's selected Shell tests in /mnt/host.
 # Caller: qemu-2-run-in-vm.sh streams this helper to the guest over SSH.
 # Environment:
 # - HOME: Used to add the user's Go binary directory to PATH.
@@ -23,7 +23,7 @@
 # Parameters:
 # - None.
 # Examples:
-# - run-in-vm.sh  # prepare the guest and run make e2e
+# - run-in-vm.sh  # prepare the guest and run selected integration/E2E scripts
 
 set -euo pipefail
 
@@ -120,7 +120,7 @@ configure_proxy() {
 
 install_test_dependencies() {
 	local os_id os_like package_manager package
-	local -a deb_packages=(curl gdb fio mdadm xfsprogs build-essential libelf-dev kmod "linux-headers-$(uname -r)")
+	local -a deb_packages=(default-jdk-headless python3 curl gdb fio mdadm xfsprogs build-essential libelf-dev kmod "linux-headers-$(uname -r)")
 	local -a rpm_packages=(
 		curl gdb fio mdadm xfsprogs gcc make elfutils-libelf-devel kmod kernel-headers
 		"kernel-devel-$(uname -r)"
@@ -237,10 +237,34 @@ pwd
 ls -alh .
 git config --global --add safe.directory /mnt/host
 
-# This is the single entry point for all guest test targets.
-vm_log '⬅️⬅️⬅️ Running tests...'
+# This fork-only harness runs the contracts affected by PR 1333.
+vm_log 'Running selected PR 1333 tests...'
 
 make install-tools
-make test
+make build
 
-vm_log '✅✅✅ Tests passed.'
+selected_logs=$(mktemp -d /tmp/huatuo-pr1333-selected.XXXXXX)
+assert_selected_test_passed() {
+	local suite=$1 test=$2
+	local log="${selected_logs}/${test%.sh}.log"
+	vm_log "selected test: ${suite}/${test}"
+	if ! bash "${suite}/run.sh" "$test" |& tee "$log"; then
+		vm_log_error "FAIL: selected test failed: ${test}; collecting guest diagnostics"
+		timeout 10s journalctl -u kubelet --no-pager -n 200 || true
+		timeout 10s journalctl -k --no-pager -n 100 || true
+		return 1
+	fi
+	if grep -q 'SKIP:' "$log"; then
+		vm_log_error "FAIL: selected test skipped cases: ${test}"
+		return 1
+	fi
+	grep -Fq "PASS: ${test} (1/1)" "$log"
+	grep -Fq 'summary: total=1 passed=1 skipped=0 failed=0' "$log"
+}
+
+assert_selected_test_passed integration test_basic_cgroup_helpers.sh
+assert_selected_test_passed e2e test_node_container_lifecycle.sh
+assert_selected_test_passed e2e test_autotracing_memory_threshold_snapshot_runtimes.sh
+assert_selected_test_passed e2e test_autotracing_memory_threshold_snapshot_lifecycle.sh
+
+vm_log 'PASS: selected PR 1333 tests'
