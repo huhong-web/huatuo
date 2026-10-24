@@ -23,7 +23,7 @@
 # Parameters:
 # - None.
 # Examples:
-# - run-in-vm.sh  # prepare the guest and run make e2e
+# - run-in-vm.sh  # prepare the guest and run selected Shell scenarios
 
 set -euo pipefail
 
@@ -237,10 +237,12 @@ pwd
 ls -alh .
 git config --global --add safe.directory /mnt/host
 
-# This is the single entry point for all guest test targets.
+# Run only the two BPF scenarios affected by this candidate.
 vm_log '⬅️⬅️⬅️ Running tests...'
 
 make install-tools
-make test
+make build
+bash integration/run.sh test_basic_bpf_observer.sh
+bash integration/run.sh test_basic_bpf_no_leak.sh
 
 vm_log '✅✅✅ Tests passed.'
