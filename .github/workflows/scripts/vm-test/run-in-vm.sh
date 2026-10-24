@@ -15,7 +15,7 @@
 # limitations under the License.
 #
 
-# Purpose: Prepare the guest test environment and run Huatuo e2e tests in /mnt/host.
+# Purpose: Prepare the guest test environment and run the fork-only dropwatch output-cancellation gate in /mnt/host.
 # Caller: qemu-2-run-in-vm.sh streams this helper to the guest over SSH.
 # Environment:
 # - HOME: Used to add the user's Go binary directory to PATH.
@@ -23,7 +23,7 @@
 # Parameters:
 # - None.
 # Examples:
-# - run-in-vm.sh  # prepare the guest and run make e2e
+# - run-in-vm.sh  # prepare the guest and run the selected dropwatch test
 
 set -euo pipefail
 
@@ -240,7 +240,12 @@ git config --global --add safe.directory /mnt/host
 # This is the single entry point for all guest test targets.
 vm_log '⬅️⬅️⬅️ Running tests...'
 
-make install-tools
-make test
+# Fork-only gate: run the one regression Shell script changed by this task.
+make build APP_CMD_SUBDIRS=cmd/dropwatch
+bash integration/run.sh test_dropwatch_output_cancellation.sh | tee /tmp/dropwatch-output-integration.log
+if ! grep -Fq 'summary: total=1 passed=1 skipped=0 failed=0' /tmp/dropwatch-output-integration.log; then
+	vm_log_error 'dropwatch output cancellation must execute once and pass without skips'
+	exit 1
+fi
 
 vm_log '✅✅✅ Tests passed.'
