@@ -137,10 +137,6 @@ kills the test Node and verifies both the old task's failure and a new task afte
 restart. Expected fault logs are allowed; runtime panics are rejected. Grafana
 page rendering is outside this coverage.
 
-Pods created by `k8s_create_pod` use a one-second termination grace period. Cleanup still
-waits for pod deletion, and container discovery tests still verify that Huatuo
-removes their metadata.
-
 The runner checks only that `_output` exists, not individual binaries or BPF artifacts. Run `make build` before invoking scripts directly. An existing directory does not imply a complete build; missing artifacts fail when used.
 
 Cases use one helper to check commands on PATH or executable paths and skip if they are missing:
@@ -381,6 +377,40 @@ populates the persistent cache, and cache download/upload time also counts.
 VM CI preloads ES7 and OpenSearch images during compilation and unit tests.
 Compatibility tests still check pullability. Prefetch logs are saved under
 `_output/storage-image-prefetch`; prefetch failures do not replace normal checks.
+
+### Batch Container Creation and Deletion E2E
+
+Run the container lifecycle case on a Kubernetes node with a reachable local
+kubelet and the `busybox:1.36.1` image already available to its container runtime:
+
+```bash
+bash e2e/run.sh test_node_container_lifecycle.sh
+```
+
+The case checks discovery of an existing container, then submits one batch of
+50 single-container Pods on the local node. Each Pod has a 128 MiB memory limit
+and a 1 MiB request; the finite limit also enables v1 memory threshold eventfds.
+After all containers run, the case records the device and inode of their memory
+cgroup watch targets. It waits for bamai's own fdinfo to contain every target:
+the memory limit file on v1, and both the limit and events files on v2.
+
+The Pods are deleted immediately after these watches are established. Their
+metadata and recorded watches must then disappear. A batch that bamai never
+monitored cannot pass just because its container API returns 404. This ordering
+tests observed container lifecycles rather than deletion before discovery.
+
+Before creation, metrics scrapes and FD samples run every two seconds until five
+consecutive samples have the same FD count, which becomes the baseline. This
+allows asynchronous tracer initialization to settle after HTTP readiness.
+After deletion, five consecutive samples must be at or below that baseline
+within 120 seconds, with the same bamai process throughout. Unexpected bamai
+error, panic or fatal logs fail the test. These checks cover the selected memory
+watches and bounded FD recovery, not every resource type; v2 watches share an
+inotify FD, so no per-container FD increase is required.
+
+FD counts and targets, watch identities and snapshots, Pod snapshots, container
+IDs and kubelet HTTP diagnostics are retained in the test workspace. Each batch
+has a unique cleanup label; partial failures also delete its Pods.
 
 ## SchedBlame Live Collection
 
