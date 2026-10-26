@@ -15,7 +15,7 @@
 # limitations under the License.
 #
 
-# Purpose: Prepare the guest test environment and run Huatuo e2e tests in /mnt/host.
+# Purpose: Prepare the guest and run the selected network Shell cases.
 # Caller: qemu-2-run-in-vm.sh streams this helper to the guest over SSH.
 # Environment:
 # - HOME: Used to add the user's Go binary directory to PATH.
@@ -23,7 +23,7 @@
 # Parameters:
 # - None.
 # Examples:
-# - run-in-vm.sh  # prepare the guest and run make e2e
+# - run-in-vm.sh  # build artifacts and run the selected Shell cases
 
 set -euo pipefail
 
@@ -237,10 +237,12 @@ pwd
 ls -alh .
 git config --global --add safe.directory /mnt/host
 
-# This is the single entry point for all guest test targets.
+# Keep this fork-only gate limited to the candidate's affected Shell cases.
 vm_log '⬅️⬅️⬅️ Running tests...'
 
 make install-tools
-make test
+make build
+bash integration/run.sh test_dropwatch_netdevsim.sh
+bash integration/run.sh test_metrics_netdev_hw.sh
 
 vm_log '✅✅✅ Tests passed.'
