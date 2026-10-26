@@ -27,22 +27,82 @@ readonly LIMITS_FIXTURES="${HUATUO_BAMAI_TEST_TMPDIR}/fixtures"
 readonly LIMITS_GATE="${LIMITS_FIXTURES}/dev/sda0"
 readonly LIMITS_PID_FILE="${HUATUO_BAMAI_TEST_TMPDIR}/huatuo-bamai.pid"
 readonly LIMITS_LOCK_FILE=/run/lock/huatuo-bamai-runtime-limits.lock
+readonly LIMITS_PARENT_STATE="${HUATUO_BAMAI_TEST_TMPDIR}/runtime-parent-invocation"
+readonly LIMITS_OBSERVED_PATHS="${HUATUO_BAMAI_TEST_TMPDIR}/runtime-cgroup-paths"
 # Bash does not export arrays to the child test process.
 readonly CURL_TIMEOUT=(--connect-timeout 2 --max-time 3)
 
 require_commands curl ss awk mkfifo flock dd
 [[ -f "${HUATUO_BAMAI_TEST_FIXTURES}/dev/sda0" ]] || fatal "XFS device fixture is missing"
 
-# The daemon uses fixed cgroup names across all test workspaces.
-# Keep the lock file: unlinking it would let another run lock a different inode.
+huatuo_bamai_require_cgroup
+
+limits_parent_scope=""
+limits_parent_invocation=""
+if [[ ${RUNTIME_CGROUP_MANAGED_SCOPE} == true ]]; then
+	if (($# == 0)); then
+		limits_parent_scope="huatuo-runtime-limits-test-${BASHPID}-${RANDOM}.scope"
+		limits_parent_description="HUATUO runtime limits test ${limits_parent_scope}"
+		cleanup_parent_scope() {
+			local status=$? properties expected="" invocation description
+			trap - EXIT
+			[[ ! -s ${LIMITS_PARENT_STATE} ]] || expected=$(< "${LIMITS_PARENT_STATE}")
+			properties=$(timeout --kill-after=1 10 systemctl show "${limits_parent_scope}" \
+				--property=LoadState --property=InvocationID --property=Description) || properties=""
+			if ! grep -qx 'LoadState=not-found' <<< "${properties}"; then
+				invocation=$(sed -n 's/^InvocationID=//p' <<< "${properties}")
+				description=$(sed -n 's/^Description=//p' <<< "${properties}")
+				# The request may have succeeded before the child could publish its ID.
+				# Its unique description reconciles that case without stopping another unit.
+				if [[ -n ${invocation} && ${description} == "${limits_parent_description}" &&
+					(-z ${expected} || ${invocation} == "${expected}") ]]; then
+					timeout --kill-after=1 10 systemctl stop "${limits_parent_scope}" || status=1
+				else
+					log_error "cannot verify parent scope ownership; preserving ${limits_parent_scope}"
+					status=1
+				fi
+			fi
+			exit "${status}"
+		}
+		trap cleanup_parent_scope EXIT
+		trap 'exit 130' INT
+		trap 'exit 143' TERM
+		# Only this new unit is reconfigured; the inherited SSH/session unit stays untouched.
+		limits_parent_status=0
+		timeout --kill-after=5 300 systemd-run --quiet --scope --unit="${limits_parent_scope}" \
+			--property="Description=${limits_parent_description}" \
+			--property=CPUAccounting=no --property=MemoryAccounting=no \
+			bash "${ROOT_DIR}/integration/test_node_runtime_limits.sh" \
+			--parent-scope "${limits_parent_scope}" "${limits_parent_description}" || limits_parent_status=$?
+		exit "${limits_parent_status}"
+	fi
+	[[ $# == 3 && $1 == --parent-scope && $2 == huatuo-runtime-limits-test-*.scope ]] \
+		|| fatal "invalid owned parent scope arguments"
+	limits_parent_scope=$2
+	limits_parent_description=$3
+	limits_parent_invocation=$(timeout --kill-after=1 10 systemctl show "${limits_parent_scope}" --property=InvocationID --value) \
+		|| fatal "cannot identify parent scope ${limits_parent_scope}"
+	limits_parent_path=$(timeout --kill-after=1 10 systemctl show "${limits_parent_scope}" --property=ControlGroup --value) \
+		|| fatal "cannot locate parent scope ${limits_parent_scope}"
+	limits_parent_actual_description=$(timeout --kill-after=1 10 systemctl show "${limits_parent_scope}" --property=Description --value) \
+		|| fatal "cannot verify parent scope ${limits_parent_scope}"
+	[[ -n ${limits_parent_invocation} && ${limits_parent_path} == /* &&
+		${limits_parent_actual_description} == "${limits_parent_description}" &&
+		$(awk -F: '$1 == "0" {print $3}' "/proc/$$/cgroup") == "${limits_parent_path}" ]] \
+		|| fatal "test process does not belong to its newly created parent scope ${limits_parent_scope}"
+	printf '%s\n' "${limits_parent_invocation}" > "${LIMITS_PARENT_STATE}"
+else
+	(($# == 0)) || fatal "parent scope arguments require hybrid cgroups with systemd"
+fi
+
+# Raw runtime groups still have fixed names, so serialize all runtime-limit cases.
+# Keep the lock inode: unlinking it would allow another run to lock a replacement.
 exec {limits_lock_fd}> "${LIMITS_LOCK_FILE}" || skip "cannot open runtime limits lock: ${LIMITS_LOCK_FILE}"
 flock -n "${limits_lock_fd}" || skip "another runtime limits test holds ${LIMITS_LOCK_FILE}"
 
 LIMITS_PORT=$(allocate_available_port) || fatal "failed to allocate a bamai port"
 readonly LIMITS_PORT
 HUATUO_BAMAI_METRICS_API="http://127.0.0.1:${LIMITS_PORT}/metrics"
-
-huatuo_bamai_require_cgroup
 
 limits_observer_pid=""
 limits_cpu_path=""
@@ -63,18 +123,21 @@ cleanup() {
 trap cleanup EXIT
 
 assert_limits_cgroups_removed() {
-	local root status=0
-	for root in "${RUNTIME_CGROUP_ROOTS[@]}"; do
-		if [[ -d "${root}${RUNTIME_CGROUP_PATH}" ]]; then
-			log_error "expected cgroup removal after shutdown; preserving unverified group: ${root}${RUNTIME_CGROUP_PATH}"
-			status=1
-		fi
-	done
+	local root path status=0
+	[[ -f ${LIMITS_OBSERVED_PATHS} ]] || return 0
+	while IFS= read -r path; do
+		for root in "${RUNTIME_CGROUP_ROOTS[@]}"; do
+			if [[ -d "${root}${path}" ]]; then
+				log_error "expected daemon cgroup removal after shutdown; preserving ${root}${path}"
+				status=1
+			fi
+		done
+	done < "${LIMITS_OBSERVED_PATHS}"
 	return "${status}"
 }
 
 limits_locate_cgroup() {
-	local pid cpu_path memory_path
+	local pid cpu_path memory_path expected_path=${RUNTIME_CGROUP_PATH}
 	[[ -s "${LIMITS_PID_FILE}" ]] || return 1
 	pid=$(< "${LIMITS_PID_FILE}")
 	[[ -r /proc/${pid}/cgroup ]] || return 1
@@ -86,11 +149,24 @@ limits_locate_cgroup() {
 		cpu_path=$(awk -F: '$2 ~ /(^|,)cpu(,|$)/ {print $3}' "/proc/${pid}/cgroup")
 		memory_path=$(awk -F: '$2 ~ /(^|,)memory(,|$)/ {print $3}' "/proc/${pid}/cgroup")
 	fi
-	if [[ ${cpu_path} != "${RUNTIME_CGROUP_PATH}" || ${memory_path} != "${RUNTIME_CGROUP_PATH}" ]]; then
-		log_error "daemon pid=${pid}: CPU cgroup=${cpu_path}, memory cgroup=${memory_path}; expected=${RUNTIME_CGROUP_PATH}"
+	if [[ ${RUNTIME_CGROUP_MANAGED_SCOPE} == true ]]; then
+		expected_path=$(timeout --kill-after=1 10 systemctl show "huatuo-bamai-${pid}.scope" --property=ControlGroup --value) \
+			|| return 1
+		[[ ${expected_path} == /* ]] || return 1
+		printf '%s\n' "${expected_path}" >> "${LIMITS_OBSERVED_PATHS}"
+		if [[ $(awk -F: '$1 == "0" {print $3}' "/proc/${pid}/cgroup") != "${expected_path}" ]]; then
+			log_error "daemon pid=${pid}: hybrid manager cgroup differs from ${expected_path}"
+			return 1
+		fi
+	fi
+	if [[ ${cpu_path} != "${expected_path}" || ${memory_path} != "${expected_path}" ]]; then
+		log_error "daemon pid=${pid}: CPU cgroup=${cpu_path}, memory cgroup=${memory_path}; expected=${expected_path}"
 		return 1
 	fi
 
+	if [[ ${RUNTIME_CGROUP_MANAGED_SCOPE} == false ]]; then
+		printf '%s\n' "${expected_path}" >> "${LIMITS_OBSERVED_PATHS}"
+	fi
 	limits_cpu_path="${RUNTIME_CGROUP_CPU_ROOT}${cpu_path}"
 	limits_memory_path="${RUNTIME_CGROUP_MEMORY_ROOT}${memory_path}"
 	grep -qx "${pid}" "${limits_cpu_path}/cgroup.procs" \
@@ -115,7 +191,7 @@ limits_match() {
 
 assert_limits() {
 	local phase=$1 cpu=$2 memory_mib=$3
-	limits_locate_cgroup || fatal "${phase}: expected daemon cgroup ${RUNTIME_CGROUP_PATH}; PID file: ${LIMITS_PID_FILE}"
+	limits_locate_cgroup || fatal "${phase}: daemon is outside its runtime cgroup; PID file: ${LIMITS_PID_FILE}"
 	wait_until 10 0.1 limits_match "${cpu}" "${memory_mib}" \
 		|| fatal "${phase}: CPU=${limits_quota}/${limits_period}, memory=${limits_memory}; expected ${cpu} cores, ${memory_mib} MiB"
 	log_info "${phase}: ${limits_cpu_path} CPU=${limits_quota}/${limits_period}, memory=${limits_memory} bytes"
@@ -127,6 +203,18 @@ assert_limits_restart() {
 	[[ ${limits_pid} != "${previous_pid}" ]] || fatal "replacement PID=${limits_pid} equals the stopped PID=${previous_pid}"
 	assert_limits running "${cpu}" "${memory_mib}"
 	huatuo_bamai_ready || fatal "replacement PID=${limits_pid} is not ready at ${HUATUO_BAMAI_METRICS_API}"
+}
+
+limits_set_parent_accounting() {
+	local enabled=$1 invocation
+	[[ ${RUNTIME_CGROUP_MANAGED_SCOPE} == true ]] || return 0
+	invocation=$(timeout --kill-after=1 10 systemctl show "${limits_parent_scope}" --property=InvocationID --value) \
+		|| fatal "cannot query owned parent scope ${limits_parent_scope}"
+	[[ ${invocation} == "${limits_parent_invocation}" ]] \
+		|| fatal "parent scope ownership changed: ${limits_parent_scope}"
+	timeout --kill-after=1 10 systemctl set-property --runtime "${limits_parent_scope}" \
+		"CPUAccounting=${enabled}" "MemoryAccounting=${enabled}" \
+		|| fatal "cannot update accounting on owned parent scope ${limits_parent_scope}"
 }
 
 limits_observe_startup() {
@@ -141,6 +229,8 @@ limits_observe_startup() {
 			|| fatal "daemon PID file was not published at the startup gate: ${LIMITS_PID_FILE}"
 		assert_limits startup "${cpu}" "${memory_mib}"
 	) || status=$?
+	# Realizing the old parent must not pull the daemon out of its own scope.
+	(limits_set_parent_accounting yes) || status=1
 
 	# Release initialization even on assertion failure, allowing normal cleanup.
 	# XFS closes after reading its superblock; write the 512-byte fixture once.
@@ -179,6 +269,8 @@ cp -a "${HUATUO_BAMAI_TEST_FIXTURES}" "${LIMITS_FIXTURES}"
 limits_old_pid=${limits_pid}
 
 for limits_values in '0.75 1.25 512' '1.5 0.5 768'; do
+	# Realize the same parent transition independently for each daemon PID.
+	limits_set_parent_accounting no
 	# 3. Each restart must apply the new configuration in both startup and runtime.
 	read -r limits_startup_cpu limits_cpu limits_memory_mib <<< "${limits_values}"
 	write_runtime_limits_config "${LIMITS_PORT}" "${limits_startup_cpu}" "${limits_cpu}" "${limits_memory_mib}"

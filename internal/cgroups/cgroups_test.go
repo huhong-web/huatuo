@@ -24,8 +24,10 @@ import (
 	"time"
 
 	"github.com/ccfos/huatuo/internal/cgroups/paths"
+	v1 "github.com/ccfos/huatuo/internal/cgroups/v1"
 	v2 "github.com/ccfos/huatuo/internal/cgroups/v2"
 
+	extcgroups "github.com/containerd/cgroups/v3"
 	"github.com/opencontainers/runtime-spec/specs-go"
 )
 
@@ -290,6 +292,13 @@ func TestCgroupInterfaces(t *testing.T) {
 		pid := os.Getpid()
 		if err := cgr.AddProc(uint64(pid)); err != nil {
 			t.Fatalf("AddProc(%d): %v", pid, err)
+		}
+		if _, hybrid := cgr.(*v1.CgroupHybrid); hybrid {
+			groups, _, err := extcgroups.ParseCgroupFileUnified("/proc/self/cgroup")
+			if err != nil {
+				t.Fatal(err)
+			}
+			runtimePath = groups["cpu"]
 		}
 		processes, err := cgr.Pids(runtimePath)
 		if err != nil {

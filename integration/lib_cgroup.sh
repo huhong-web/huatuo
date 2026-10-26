@@ -103,11 +103,11 @@ cgroup_css_require_environment() {
 	printf -v "$3" '%s' "${_css_notify_file}"
 }
 
-# Call once before startup, in the current shell. Reject existing leaf groups;
-# absence is only a precondition, not proof of ownership during later cleanup.
+# Call once before startup, in the current shell. Unmanaged modes reject existing
+# leaf groups; absence alone does not prove ownership during later cleanup.
 # This check never creates or configures cgroups.
 huatuo_bamai_require_cgroup() {
-	local controller root
+	local controller root managed_scope=false
 	require_commands findmnt
 
 	if [[ -f /sys/fs/cgroup/cgroup.controllers ]]; then
@@ -131,15 +131,28 @@ huatuo_bamai_require_cgroup() {
 		RUNTIME_CGROUP_MEMORY_ROOT=$(cgroup_memory_root) \
 			|| skip "cgroup memory controller is unavailable"
 		readonly RUNTIME_CGROUP_CPU_ROOT RUNTIME_CGROUP_MEMORY_ROOT
-		readonly RUNTIME_CGROUP_PATH=/huatuo-bamai
+		RUNTIME_CGROUP_PATH=/huatuo-bamai
 		mapfile -t RUNTIME_CGROUP_ROOTS < <(findmnt -rn -t cgroup -o TARGET)
-		readonly RUNTIME_CGROUP_ROOTS
+		if [[ $(findmnt -rn -T /sys/fs/cgroup/unified -o FSTYPE 2> /dev/null) == cgroup2 &&
+		-d /run/systemd/system && $(< /proc/1/comm) == systemd ]]; then
+			require_commands systemctl systemd-run timeout
+			timeout --kill-after=1 10 systemctl show --property=Version > /dev/null 2>&1 \
+				|| skip "hybrid runtime limits require the running systemd manager"
+			managed_scope=true
+			# PID-based scope paths are discovered from systemd after startup.
+			RUNTIME_CGROUP_PATH=""
+			RUNTIME_CGROUP_ROOTS+=(/sys/fs/cgroup/unified)
+		fi
+		readonly RUNTIME_CGROUP_PATH RUNTIME_CGROUP_ROOTS
 	fi
 
-	for root in "${RUNTIME_CGROUP_ROOTS[@]}"; do
-		[[ ! -d "${root}${RUNTIME_CGROUP_PATH}" ]] \
-			|| skip "runtime cgroup already exists: ${root}${RUNTIME_CGROUP_PATH}"
-	done
-	[[ -w "${RUNTIME_CGROUP_CPU_ROOT}" && -w "${RUNTIME_CGROUP_MEMORY_ROOT}" ]] \
-		|| skip "CPU and memory cgroup roots must be writable"
+	readonly RUNTIME_CGROUP_MANAGED_SCOPE=${managed_scope}
+	if [[ ${managed_scope} == false ]]; then
+		for root in "${RUNTIME_CGROUP_ROOTS[@]}"; do
+			[[ ! -d "${root}${RUNTIME_CGROUP_PATH}" ]] \
+				|| skip "runtime cgroup already exists: ${root}${RUNTIME_CGROUP_PATH}"
+		done
+		[[ -w "${RUNTIME_CGROUP_CPU_ROOT}" && -w "${RUNTIME_CGROUP_MEMORY_ROOT}" ]] \
+			|| skip "CPU and memory cgroup roots must be writable"
+	fi
 }

@@ -15,12 +15,15 @@
 package v1
 
 import (
+	"math"
 	"os"
 	"path/filepath"
 	"testing"
 
 	"github.com/ccfos/huatuo/internal/cgroups/paths"
 	"github.com/ccfos/huatuo/internal/cgroups/subsystem"
+
+	"github.com/opencontainers/runtime-spec/specs-go"
 )
 
 func TestCpuUsageReadsCPUAcctSubsystem(t *testing.T) {
@@ -87,5 +90,137 @@ func writeCgroupFile(t *testing.T, path, content string) {
 	}
 	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestHybridRuntimeProperties(t *testing.T) {
+	period, quota, memory := uint64(100000), int64(123451), int64(768*1024*1024)
+	properties, err := hybridProperties(&specs.LinuxResources{
+		CPU: &specs.LinuxCPU{
+			Period: &period,
+			Quota:  &quota,
+		},
+		Memory: &specs.LinuxMemory{Limit: &memory},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	got := make(map[string]any)
+	for _, property := range properties {
+		got[property.Name] = property.Value.Value()
+	}
+	for name, want := range map[string]uint64{
+		"CPUQuotaPerSecUSec": 1234510,
+		"CPUQuotaPeriodUSec": period,
+		"MemoryMax":          uint64(memory),
+	} {
+		if got[name] != want {
+			t.Errorf("%s = %v, want %v", name, got[name], want)
+		}
+	}
+
+	quota = -1
+	properties, err = hybridProperties(&specs.LinuxResources{CPU: &specs.LinuxCPU{Quota: &quota}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if properties[0].Value.Value() != uint64(math.MaxUint64) {
+		t.Errorf("unlimited quota = %v", properties[0])
+	}
+	properties, err = hybridProperties(&specs.LinuxResources{CPU: &specs.LinuxCPU{
+		Period: &period,
+		Quota:  &quota,
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, property := range properties {
+		if property.Name == "MemoryMax" {
+			t.Fatal("CPU-only update changes memory limit")
+		}
+	}
+}
+
+func TestHybridRuntimeRejectsInvalidResources(t *testing.T) {
+	period := uint64(100000)
+	for _, quota := range []int64{-2, 0, 1, 999, math.MaxInt64} {
+		if _, err := hybridProperties(&specs.LinuxResources{CPU: &specs.LinuxCPU{
+			Period: &period,
+			Quota:  &quota,
+		}}); err == nil {
+			t.Errorf("quota %d accepted", quota)
+		}
+	}
+
+	quota := int64(50000)
+	if _, err := hybridProperties(&specs.LinuxResources{CPU: &specs.LinuxCPU{Quota: &quota}}); err == nil {
+		t.Error("quota without period accepted")
+	}
+	for _, period := range []uint64{0, 999, 1000001} {
+		if _, err := hybridProperties(&specs.LinuxResources{CPU: &specs.LinuxCPU{
+			Period: &period,
+			Quota:  &quota,
+		}}); err == nil {
+			t.Errorf("period %d accepted", period)
+		}
+	}
+
+	if _, err := hybridProperties(&specs.LinuxResources{CPU: &specs.LinuxCPU{Period: &period}}); err == nil {
+		t.Error("period-only update accepted")
+	}
+	for _, shares := range []uint64{0, 1, 262145} {
+		if _, err := hybridProperties(&specs.LinuxResources{CPU: &specs.LinuxCPU{Shares: &shares}}); err == nil {
+			t.Errorf("CPU shares %d accepted", shares)
+		}
+	}
+	for _, shares := range []uint64{2, 262144} {
+		if _, err := hybridProperties(&specs.LinuxResources{CPU: &specs.LinuxCPU{Shares: &shares}}); err != nil {
+			t.Errorf("CPU shares %d: %v", shares, err)
+		}
+	}
+
+	memory := int64(-2)
+	for _, resources := range []*specs.LinuxResources{
+		nil,
+		{Memory: &specs.LinuxMemory{Limit: &memory}},
+		{CPU: &specs.LinuxCPU{Cpus: "0"}},
+		{Pids: &specs.LinuxPids{Limit: 1}},
+	} {
+		if _, err := hybridProperties(resources); err == nil {
+			t.Errorf("invalid resources accepted: %+v", resources)
+		}
+	}
+}
+
+func TestHybridPendingRuntimeLifecycle(t *testing.T) {
+	c, err := NewHybrid()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := c.DeleteRuntime(); err == nil {
+		t.Fatal("delete without runtime accepted")
+	}
+	if err := c.NewRuntime("test", &specs.LinuxResources{}); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.NewRuntime("other", &specs.LinuxResources{}); err == nil {
+		t.Fatal("existing runtime replaced")
+	}
+	quota, period := int64(50000), uint64(100000)
+	if err := c.UpdateRuntime(&specs.LinuxResources{CPU: &specs.LinuxCPU{
+		Period: &period,
+		Quota:  &quota,
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.DeleteRuntime(); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.AddProc(uint64(os.Getpid())); err == nil {
+		t.Fatal("PID added without runtime")
+	}
+	if err := c.DeleteRuntime(); err == nil {
+		t.Fatal("double delete accepted")
 	}
 }

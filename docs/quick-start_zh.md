@@ -124,7 +124,11 @@ HUATUO 通过 kubelet 接口获取 Pod 和容器信息。按实际环境设置�
 
 ### 资源限制
 
-Kubernetes 和 systemd 部署默认由 kubelet 或 systemd 管理 HUATUO 的 cgroup，HUATUO 不会迁移自身 PID。只有直接运行且没有外部管理器时，才使用 `--enable-cgroup` 并配置：
+HUATUO 默认继承启动进程的 cgroup，因此 Kubernetes 和 systemd 部署继续由 kubelet 或 systemd 管理已有的资源限制。直接运行时，可通过 `--enable-cgroup` 启用 HUATUO 自身的限制。
+
+在运行 systemd 的 hybrid 主机上，HUATUO 为 daemon 创建 `huatuo-bamai-<PID>.scope`，由 systemd 通过 D-Bus 应用启动和稳态 CPU 限额及内存限额。scope 初始化失败会导致启动失败。纯 legacy、未运行 systemd 的 hybrid 和 unified 主机保留现有的 runtime cgroup 行为。
+
+配置示例：
 
 ```toml
 [Runtime]

@@ -124,7 +124,11 @@ Adjust the configurable event and AutoTracing thresholds in `huatuo-bamai.conf` 
 
 ### Resource Limits
 
-In Kubernetes and systemd deployments, kubelet or systemd manages HUATUO's cgroup by default; HUATUO does not move its own PID. Use `--enable-cgroup` and the following configuration only when running directly without an external manager:
+HUATUO inherits its launcher's cgroup by default. In Kubernetes and systemd deployments, kubelet or systemd therefore remains responsible for the existing resource limits. Enable HUATUO's own limits with `--enable-cgroup` when running directly.
+
+On a hybrid host running systemd, HUATUO creates a `huatuo-bamai-<PID>.scope` for the daemon. Systemd applies the startup and steady-state CPU limits and the memory limit through D-Bus. Failure to initialize the scope fails startup. Pure legacy hosts, hybrid hosts without systemd and unified hosts retain their existing runtime-cgroup behavior.
+
+Configuration example:
 
 ```toml
 [Runtime]

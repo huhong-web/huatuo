@@ -97,6 +97,9 @@ func NewManager() (Cgroup, error) {
 	case extcgroups.Unified:
 		return v2.New()
 	case extcgroups.Hybrid:
+		if v1.SystemdRunning() {
+			return v1.NewHybrid()
+		}
 		return v1.New()
 	default:
 		return nil, fmt.Errorf("not supported")

@@ -14,7 +14,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# Fork-only evidence collection; production sources and selected tests stay intact.
+# Fork-only evidence collection for the two selected Ubuntu regressions.
 set -euo pipefail
 cd /mnt/host
 readonly evidence=/root/runtime-rotation-debug
@@ -29,10 +29,9 @@ findmnt -t cgroup,cgroup2
 git config --global --add safe.directory /mnt/host
 git rev-parse HEAD
 git diff HEAD --exit-code
-make _output/bin/huatuo-bamai _output/bin/dropwatch SKIP_PORTABLE_GENERATION=1
-mkdir -p _output/bpf _output/conf
-cp bpf/*.o _output/bpf/
-cp ./*.conf _output/conf/
+# Runtime limits uses the default daemon config, which also launches tcpshark.
+# Prepare the normal command set without invoking any additional test suite.
+make build SKIP_PORTABLE_GENERATION=1
 sha256sum _output/bin/huatuo-bamai _output/bin/dropwatch > "$evidence/binary-hashes.txt"
 
 trace_reader=""
