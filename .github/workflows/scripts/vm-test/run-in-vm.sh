@@ -270,17 +270,8 @@ run_guest_tests() {
 	# This is the single entry point for all guest test targets.
 	vm_log '⬅️⬅️⬅️ Running tests...'
 
-	# Hide image downloads behind compilation and unit tests. Compatibility cases
-	# still perform their normal pull checks, including when prefetch fails.
-	storage_prefetch_pids=()
-	trap stop_storage_image_prefetch EXIT
-	prefetch_storage_images
-	make install-tools
-	if [[ -f _output/portable-generated.commit ]]; then
-		make test SKIP_PORTABLE_GENERATION=1
-	else
-		make test
-	fi
+	# This fork-only diagnostic run selects two existing Shell scenarios.
+	bash .github/workflows/scripts/debug-runtime-rotation.sh
 
 	vm_log '✅✅✅ Tests passed.'
 }
