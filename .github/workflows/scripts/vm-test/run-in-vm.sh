@@ -276,12 +276,7 @@ run_guest_tests() {
 	trap stop_storage_image_prefetch EXIT
 	prefetch_storage_images
 	make install-tools
-	if [[ -f _output/portable-generated.commit ]]; then
-		make test SKIP_PORTABLE_GENERATION=1
-	else
-		make test
-	fi
-
+	bash .github/workflows/scripts/debug-runtime-full.sh
 	vm_log '✅✅✅ Tests passed.'
 }
 
