@@ -153,7 +153,7 @@ jobs:
         id: upterm-before
         if: >-
           github.event_name == 'workflow_dispatch' &&
-          inputs.debug_mode == 'Before test' &&
+          (inputs.debug_mode == 'Before test' || inputs.debug_mode == 'After test always') &&
           steps.start-vm.outcome == 'success'
         continue-on-error: true
         timeout-minutes: 5
@@ -163,8 +163,33 @@ jobs:
           limit-access-to-actor: true
           wait-timeout-minutes: 1
 
+      - name: Publish diagnostic SSH connection
+        if: inputs.debug_mode == 'After test always'
+        env:
+          SSH_COMMAND: ${{ steps.upterm-before.outputs.ssh-command }}
+          SSH_OUTCOME: ${{ steps.upterm-before.outcome }}
+        run: |
+          test "$SSH_OUTCOME" = success
+          test -n "$SSH_COMMAND"
+          mkdir -p "$RUNNER_TEMP/native-debug-connection"
+          python3 - <<'PYCODE'
+          import json, os, pathlib
+          fields = ("SSH_COMMAND", "VM_IP", "VM_SSH_KEY", "VM_ENV_FILE", "GITHUB_SHA", "GITHUB_RUN_ID", "GITHUB_RUN_ATTEMPT")
+          data = {key: os.environ[key] for key in fields}
+          path = pathlib.Path(os.environ["RUNNER_TEMP"]) / "native-debug-connection" / "connection.json"
+          path.write_text(json.dumps(data, indent=2))
+          PYCODE
+
+      - name: Upload diagnostic SSH connection
+        if: inputs.debug_mode == 'After test always' && steps.upterm-before.outcome == 'success'
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-debug-connection-${{ matrix.os }}
+          path: ${{ runner.temp }}/native-debug-connection
+          if-no-files-found: error
+
       - name: 'Debug VM: Retain before test'
-        if: steps.upterm-before.outcome == 'success'
+        if: inputs.debug_mode == 'Before test' && steps.upterm-before.outcome == 'success'
         timeout-minutes: 330
         env:
           DEBUG_TIMEOUT_MINUTES: ${{ inputs.debug_timeout_minutes }}
@@ -172,11 +197,43 @@ jobs:
         run: |
           bash .github/workflows/scripts/qemu-debug-vm.sh
 
+      - name: Require verified SSH before integration
+        if: inputs.debug_mode == 'After test always'
+        timeout-minutes: 12
+        run: |
+          ready="$GITHUB_WORKSPACE/.native-memory-ssh-ready-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          deadline=$((SECONDS + 600))
+          while [[ ! -f "$ready" ]] && ((SECONDS < deadline)); do sleep 2; done
+          test -f "$ready"
+          test "$(cat "$ready")" = "$GITHUB_SHA"
+
       - name: Run in VM
         id: run-in-vm
         timeout-minutes: 90
         run: |
-          .github/workflows/scripts/qemu-2-run-in-vm.sh --test-only
+          source "$VM_ENV_FILE"
+          ssh -i "$VM_SSH_KEY" -o BatchMode=yes \
+            -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+            "root@$VM_IP" bash /mnt/host/.github/workflows/scripts/debug-native-memory-suite.sh
+
+      - name: Collect native memory suite diagnostics
+        if: always() && steps.start-vm.outcome == 'success'
+        continue-on-error: true
+        run: |
+          source "$VM_ENV_FILE"
+          mkdir -p "$RUNNER_TEMP/native-memory-suite-debug"
+          scp -r -i "$VM_SSH_KEY" -o BatchMode=yes \
+            -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+            "root@$VM_IP:/root/native-memory-suite/." \
+            "$RUNNER_TEMP/native-memory-suite-debug/"
+
+      - name: Upload native memory suite diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-memory-suite-${{ matrix.os }}
+          path: ${{ runner.temp }}/native-memory-suite-debug
+          if-no-files-found: error
 
       - name: Collect VM Go cache
         if: steps.run-in-vm.outcome == 'success' && steps.go-cache-key.outputs.key != '' && steps.go-cache.outputs.cache-hit != 'true'
@@ -189,6 +246,7 @@ jobs:
           always() &&
           github.event_name == 'workflow_dispatch' &&
           steps.start-vm.outcome == 'success' &&
+          steps.upterm-before.outcome != 'success' &&
           (
             inputs.debug_mode == 'After test always' ||
             (
@@ -205,11 +263,14 @@ jobs:
           wait-timeout-minutes: 1
 
       - name: 'Debug VM: Retain after test'
-        if: always() && steps.upterm-after.outcome == 'success'
+        if: >-
+          always() &&
+          (steps.upterm-after.outcome == 'success' ||
+          (inputs.debug_mode == 'After test always' && steps.upterm-before.outcome == 'success'))
         timeout-minutes: 330
         env:
           DEBUG_TIMEOUT_MINUTES: ${{ inputs.debug_timeout_minutes }}
-          UPTERM_SSH_COMMAND: ${{ steps.upterm-after.outputs.ssh-command }}
+          UPTERM_SSH_COMMAND: ${{ steps.upterm-after.outputs.ssh-command || steps.upterm-before.outputs.ssh-command }}
         run: |
           bash .github/workflows/scripts/qemu-debug-vm.sh
 
