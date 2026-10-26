@@ -88,6 +88,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
 
       - name: Host Init
         run: |
@@ -177,6 +179,27 @@ jobs:
         timeout-minutes: 90
         run: |
           .github/workflows/scripts/qemu-2-run-in-vm.sh --test-only
+
+      - name: Collect runtime diagnostics
+        if: always() && steps.start-vm.outcome == 'success'
+        continue-on-error: true
+        run: |
+          source "$VM_ENV_FILE"
+          mkdir -p "$RUNNER_TEMP/runtime-full-debug"
+          scp -r -i "$VM_SSH_KEY" -o BatchMode=yes \
+            -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+            "root@$VM_IP:/root/runtime-full-debug/." "$RUNNER_TEMP/runtime-full-debug/"
+          # Preserve original log names inside one portable artifact filename.
+          tar -C "$RUNNER_TEMP/runtime-full-debug" -czf "$RUNNER_TEMP/runtime-full-debug.tar.gz" .
+
+      - name: Upload runtime diagnostics
+        if: always() && steps.start-vm.outcome == 'success'
+        uses: actions/upload-artifact@v4
+        with:
+          name: runtime-full-${{ matrix.os }}
+          path: ${{ runner.temp }}/runtime-full-debug.tar.gz
+          if-no-files-found: error
+          retention-days: 90
 
       - name: Collect VM Go cache
         if: steps.run-in-vm.outcome == 'success' && steps.go-cache-key.outputs.key != '' && steps.go-cache.outputs.cache-hit != 'true'

@@ -15,7 +15,7 @@
 # limitations under the License.
 #
 
-# Purpose: Prepare the guest test environment and run Huatuo e2e tests in /mnt/host.
+# Purpose: Prepare the guest and run full unit/integration diagnostics.
 # Caller: qemu-2-run-in-vm.sh streams this helper to the guest over SSH.
 # Environment:
 # - HOME: Used to add the user's Go binary directory to PATH.
@@ -23,7 +23,7 @@
 # Parameters:
 # - Optional --prepare-only or --test-only; omitted runs both phases.
 # Examples:
-# - run-in-vm.sh  # prepare the guest and run make test
+# - run-in-vm.sh  # prepare the guest and run full diagnostics
 
 set -euo pipefail
 
@@ -244,6 +244,7 @@ stop_storage_image_prefetch() {
 }
 
 run_guest_tests() {
+	local diagnostic_mode=${2:-}
 	configure_proxy
 	export PATH="/usr/local/go/bin:${HOME}/go/bin:${PATH}"
 	export GOCACHE=/root/.cache/go-build
@@ -276,14 +277,17 @@ run_guest_tests() {
 	trap stop_storage_image_prefetch EXIT
 	prefetch_storage_images
 	make install-tools
-	if [[ -f _output/portable-generated.commit ]]; then
+	if [[ "$diagnostic_mode" == --runtime-full-debug ]]; then
+		bash .github/workflows/scripts/debug-runtime-full.sh
+	elif [[ -f _output/portable-generated.commit ]]; then
 		make test SKIP_PORTABLE_GENERATION=1
 	else
 		make test
 	fi
-
 	vm_log '✅✅✅ Tests passed.'
 }
 
 # Also support sourcing the entry function in local regression fixtures.
-if [[ ${BASH_SOURCE[0]:-$0} == "$0" ]]; then run_guest_tests "$@"; fi
+# The private second parameter selects diagnostics only for the streamed entry.
+# Sourced regression fixtures retain the original make test behavior.
+if [[ ${BASH_SOURCE[0]:-$0} == "$0" ]]; then run_guest_tests "${1:-}" --runtime-full-debug; fi
