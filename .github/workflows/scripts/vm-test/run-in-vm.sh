@@ -15,7 +15,7 @@
 # limitations under the License.
 #
 
-# Purpose: Prepare the guest test environment and run Huatuo e2e tests in /mnt/host.
+# Purpose: Prepare the guest and run the fork-only toolstream shutdown gate.
 # Caller: qemu-2-run-in-vm.sh streams this helper to the guest over SSH.
 # Environment:
 # - HOME: Used to add the user's Go binary directory to PATH.
@@ -23,7 +23,7 @@
 # Parameters:
 # - None.
 # Examples:
-# - run-in-vm.sh  # prepare the guest and run make e2e
+# - run-in-vm.sh  # run both toolstream shutdown scenarios through tcpshark
 
 set -euo pipefail
 
@@ -240,7 +240,17 @@ git config --global --add safe.directory /mnt/host
 # This is the single entry point for all guest test targets.
 vm_log '⬅️⬅️⬅️ Running tests...'
 
-make install-tools
-make test
+# This fork harness builds only the command needed by the selected Shell test.
+make build APP_CMD_SUBDIRS='cmd/tcpshark'
+bash integration/run.sh test_toolstream_output_cancellation.sh | tee /tmp/toolstream-output-integration.log
+for expected in \
+	'toolstream shutdown scenario passed: blocked' \
+	'toolstream shutdown scenario passed: healthy' \
+	'summary: total=1 passed=1 skipped=0 failed=0'; do
+	if ! grep -Fq "${expected}" /tmp/toolstream-output-integration.log; then
+		vm_log_error "toolstream gate missing required execution evidence: ${expected}"
+		exit 1
+	fi
+done
 
 vm_log '✅✅✅ Tests passed.'
