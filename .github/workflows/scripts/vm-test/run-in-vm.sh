@@ -15,15 +15,16 @@
 # limitations under the License.
 #
 
-# Purpose: Prepare the guest test environment and run Huatuo e2e tests in /mnt/host.
+# Purpose: Prepare the guest and run the selected test scope in /mnt/host.
 # Caller: qemu-2-run-in-vm.sh streams this helper to the guest over SSH.
 # Environment:
 # - HOME: Used to add the user's Go binary directory to PATH.
 # - PATH: Extended with system and user Go binary directories.
 # Parameters:
 # - Optional --prepare-only or --test-only; omitted runs both phases.
+# - Sourced run_guest_tests accepts --rotation-only as its second argument.
 # Examples:
-# - run-in-vm.sh  # prepare the guest and run make test
+# - run-in-vm.sh  # prepare the guest and run the rotation case
 
 set -euo pipefail
 
@@ -243,7 +244,16 @@ stop_storage_image_prefetch() {
 	exit "${status}"
 }
 
+assert_rotation_case_passed() {
+	local log_file=$1
+	grep -q 'summary: total=1 passed=1 skipped=0 failed=0$' "${log_file}" || {
+		vm_log_error "rotation result: expected one passed case without skips; inspect ${log_file}"
+		return 1
+	}
+}
+
 run_guest_tests() {
+	local test_scope=${2:-}
 	configure_proxy
 	export PATH="/usr/local/go/bin:${HOME}/go/bin:${PATH}"
 	export GOCACHE=/root/.cache/go-build
@@ -258,32 +268,43 @@ run_guest_tests() {
 	if [[ ! -f _output/portable-generated.commit ]]; then
 		install_temporary_go_tools
 	fi
-	export JAVA_PROFILER_DOCKER_IMAGE=eclipse-temurin:17-jdk
-	export JAVA_PROFILER_CONTAINERD_IMAGE=docker.io/library/eclipse-temurin:17-jdk
-	export NATIVE_PROFILER_DOCKER_IMAGE=busybox:1.36.1
-	export NATIVE_PROFILER_CONTAINERD_IMAGE=docker.io/library/busybox:1.36.1
-
 	pwd
 	ls -alh .
 	git config --global --add safe.directory /mnt/host
-
-	# This is the single entry point for all guest test targets.
-	vm_log '⬅️⬅️⬅️ Running tests...'
-
-	# Hide image downloads behind compilation and unit tests. Compatibility cases
-	# still perform their normal pull checks, including when prefetch fails.
-	storage_prefetch_pids=()
-	trap stop_storage_image_prefetch EXIT
-	prefetch_storage_images
-	make install-tools
-	if [[ -f _output/portable-generated.commit ]]; then
-		make test SKIP_PORTABLE_GENERATION=1
+	if [[ ${test_scope} == --rotation-only ]]; then
+		vm_log 'Running local storage rotation integration test...'
+		make install-tools
+		if [[ -f _output/portable-generated.commit ]]; then
+			make build SKIP_PORTABLE_GENERATION=1
+		else
+			make build
+		fi
+		bash integration/run.sh test_basic_storage_localfile_rotation.sh | tee _output/rotation-ci.log
+		assert_rotation_case_passed _output/rotation-ci.log
 	else
-		make test
+		export JAVA_PROFILER_DOCKER_IMAGE=eclipse-temurin:17-jdk
+		export JAVA_PROFILER_CONTAINERD_IMAGE=docker.io/library/eclipse-temurin:17-jdk
+		export NATIVE_PROFILER_DOCKER_IMAGE=busybox:1.36.1
+		export NATIVE_PROFILER_CONTAINERD_IMAGE=docker.io/library/busybox:1.36.1
+
+		# Preserve the full-suite path exercised by sourced regression fixtures.
+		vm_log '⬅️⬅️⬅️ Running tests...'
+
+		# Hide image downloads behind compilation and unit tests. Compatibility cases
+		# still perform their normal pull checks, including when prefetch fails.
+		storage_prefetch_pids=()
+		trap stop_storage_image_prefetch EXIT
+		prefetch_storage_images
+		make install-tools
+		if [[ -f _output/portable-generated.commit ]]; then
+			make test SKIP_PORTABLE_GENERATION=1
+		else
+			make test
+		fi
 	fi
 
 	vm_log '✅✅✅ Tests passed.'
 }
 
-# Also support sourcing the entry function in local regression fixtures.
-if [[ ${BASH_SOURCE[0]:-$0} == "$0" ]]; then run_guest_tests "$@"; fi
+# Sourced regression fixtures retain the original full-suite entry contract.
+if [[ ${BASH_SOURCE[0]:-$0} == "$0" ]]; then run_guest_tests "${1:-}" --rotation-only; fi
