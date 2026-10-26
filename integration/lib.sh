@@ -474,7 +474,14 @@ huatuo_bamai_stop() {
 	local test_workspace=${1:-${HUATUO_BAMAI_TEST_TMPDIR}}
 	local pid
 	pid=$(cat "${test_workspace}/huatuo-bamai.pid" 2> /dev/null || echo "")
-	[[ -n "$pid" ]] && stop_by_pid "${pid}"
+	if [[ -n ${pid} ]]; then
+		stop_by_pid "${pid}" || return 1
+		# Readers must stop before callers remove their devices or workspace.
+		if ! wait_until 2 0.1 process_exited "${pid}"; then
+			log_error "huatuo-bamai pid=${pid} is still running; retaining PID file"
+			return 1
+		fi
+	fi
 	rm -f "${test_workspace}/huatuo-bamai.pid"
 }
 
