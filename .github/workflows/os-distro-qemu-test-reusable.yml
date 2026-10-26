@@ -178,6 +178,25 @@ jobs:
         run: |
           .github/workflows/scripts/qemu-2-run-in-vm.sh --test-only
 
+      - name: Collect physical usage diagnostics
+        if: always() && steps.start-vm.outcome == 'success'
+        continue-on-error: true
+        run: |
+          source "$VM_ENV_FILE"
+          mkdir -p "$RUNNER_TEMP/native-physical-debug"
+          scp -r -i "$VM_SSH_KEY" -o BatchMode=yes \
+            -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+            "root@$VM_IP:/root/native-physical-usage-debug/." \
+            "$RUNNER_TEMP/native-physical-debug/"
+
+      - name: Upload physical usage diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-physical-usage-${{ matrix.os }}
+          path: ${{ runner.temp }}/native-physical-debug
+          if-no-files-found: error
+
       - name: Collect VM Go cache
         if: steps.run-in-vm.outcome == 'success' && steps.go-cache-key.outputs.key != '' && steps.go-cache.outputs.cache-hit != 'true'
         continue-on-error: true
