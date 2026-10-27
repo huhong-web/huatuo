@@ -27,6 +27,29 @@ huatuo_bamai_runqlat_container_latency{container_host="coredns-855c4dd65d-8v5kg"
 
 This example shows host and container scheduling-latency bucket counts. The `zone` ranges are listed below.
 
+## Build Information
+
+`huatuo_bamai_build_info` is a Gauge with a constant value of `1` describing the
+running bamai build. It carries the common `host` and `region` labels and these
+build labels:
+
+| Label | Meaning |
+| --- | --- |
+| `name` | Application name, matching `name` in `/version` |
+| `version` | bamai release version, matching `version` in `/version` |
+| `git_commit` | Build Git identifier, matching `git_commit` in `/version`; not necessarily a full SHA |
+| `git_tree_state` | Build working-tree state: `clean`, `dirty`, or `unknown` |
+| `build_time` | Timestamp from `/version`: injected build time, falling back to VCS commit time or `(devel)` |
+| `go_version` | Go toolchain version used to build the application |
+| `compiler` | Go compiler, such as `gc` |
+| `platform` | Operating system and architecture, such as `linux/amd64` |
+
+Development builds without a release version or Git identifier use `(devel)`.
+Build labels apply only to this metric; business metric labels remain unchanged.
+After scraping, join build information with business metrics using the same
+`job` and `instance`. Cross-cluster queries must also include the labels that
+distinguish targets between clusters.
+
 ## CPU
 
 ### Scheduling Latency
