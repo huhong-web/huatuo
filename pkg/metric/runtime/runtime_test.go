@@ -15,9 +15,14 @@
 package runtime
 
 import (
+	"maps"
 	"testing"
 
 	"github.com/prometheus/client_golang/prometheus"
+	dto "github.com/prometheus/client_model/go"
+
+	"github.com/ccfos/huatuo/internal/version"
+	"github.com/ccfos/huatuo/pkg/metric"
 )
 
 func TestRegisterCollector(t *testing.T) {
@@ -41,7 +46,7 @@ func TestRegisterCollector(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			reg := prometheus.NewRegistry()
-			RegisterCollector(reg, tt.namespace)
+			RegisterCollector(reg, tt.namespace, nil)
 			families, err := reg.Gather()
 			if err != nil {
 				t.Fatalf("Gather() returned error: %v", err)
@@ -61,7 +66,7 @@ func TestRegisterCollector(t *testing.T) {
 
 func TestRegisterCollectorProcessMetrics(t *testing.T) {
 	reg := prometheus.NewRegistry()
-	RegisterCollector(reg, "huatuo")
+	RegisterCollector(reg, "huatuo", nil)
 
 	families, err := reg.Gather()
 	if err != nil {
@@ -90,7 +95,7 @@ func TestRegisterCollectorProcessMetrics(t *testing.T) {
 
 func TestRegisterCollectorGoMetrics(t *testing.T) {
 	reg := prometheus.NewRegistry()
-	RegisterCollector(reg, "huatuo")
+	RegisterCollector(reg, "huatuo", nil)
 
 	families, err := reg.Gather()
 	if err != nil {
@@ -119,7 +124,7 @@ func TestRegisterCollectorGoMetrics(t *testing.T) {
 
 func TestRegisterCollectorNoDuplicate(t *testing.T) {
 	reg := prometheus.NewRegistry()
-	RegisterCollector(reg, "test")
+	RegisterCollector(reg, "test", nil)
 
 	families, err := reg.Gather()
 	if err != nil {
@@ -136,5 +141,97 @@ func TestRegisterCollectorNoDuplicate(t *testing.T) {
 		if count > 1 {
 			t.Errorf("metric %q registered %d times, want 1", name, count)
 		}
+	}
+}
+
+func TestRegisterCollectorBuildInfo(t *testing.T) {
+	info := &version.Info{
+		Version:      "2.3.0",
+		GitCommit:    "0123456789abcdef",
+		GitTreeState: "dirty",
+	}
+	tests := []struct {
+		name       string
+		namespace  string
+		info       *version.Info
+		metricName string
+	}{
+		{
+			name:       "bamai namespace",
+			namespace:  "huatuo_bamai",
+			info:       info,
+			metricName: "huatuo_bamai_build_info",
+		},
+		{
+			name:       "empty namespace",
+			info:       info,
+			metricName: "build_info",
+		},
+		{
+			name:      "development build",
+			namespace: "huatuo_bamai",
+			info: &version.Info{
+				Version:      version.Devel,
+				GitCommit:    version.Devel,
+				GitTreeState: "unknown",
+			},
+			metricName: "huatuo_bamai_build_info",
+		},
+		{
+			name:       "without build information",
+			namespace:  "huatuo_apiserver",
+			metricName: "huatuo_apiserver_build_info",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			reg := prometheus.NewRegistry()
+			RegisterCollector(reg, tt.namespace, tt.info)
+			families, err := reg.Gather()
+			if err != nil {
+				t.Fatalf("Gather() returned error: %v", err)
+			}
+
+			var buildInfo *dto.MetricFamily
+			for _, family := range families {
+				if family.GetName() == tt.metricName {
+					buildInfo = family
+					break
+				}
+			}
+			if tt.info == nil {
+				if buildInfo != nil {
+					t.Fatalf("unexpected %s without application build information", tt.metricName)
+				}
+				return
+			}
+
+			if buildInfo == nil {
+				t.Fatalf("expected %s to be registered", tt.metricName)
+			}
+			if buildInfo.GetType() != dto.MetricType_GAUGE || len(buildInfo.Metric) != 1 {
+				t.Fatalf("expected one build-info gauge, got %v", buildInfo)
+			}
+			sample := buildInfo.Metric[0]
+			if sample.GetGauge().GetValue() != 1 {
+				t.Errorf("build-info value = %v, want 1", sample.GetGauge().GetValue())
+			}
+
+			labels := make(map[string]string, len(sample.Label))
+			for _, label := range sample.Label {
+				labels[label.GetName()] = label.GetValue()
+			}
+			wantLabels := map[string]string{
+				"version":          tt.info.Version,
+				"git_commit":       tt.info.GitCommit,
+				"git_tree_state":   tt.info.GitTreeState,
+				metric.LabelHost:   metric.DefaultHostname(),
+				metric.LabelRegion: metric.DefaultRegion(),
+			}
+			if !maps.Equal(labels, wantLabels) {
+				t.Errorf("build-info labels = %v, want %v", labels, wantLabels)
+			}
+		})
 	}
 }

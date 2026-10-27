@@ -27,6 +27,21 @@ huatuo_bamai_runqlat_container_latency{container_host="coredns-855c4dd65d-8v5kg"
 
 此例分别展示宿主机和容器的调度延迟分桶计数，`zone` 的范围见下文。
 
+## 构建信息
+
+`huatuo_bamai_build_info` 是值恒为 `1` 的 Gauge，表示 bamai 当前运行的构建。
+它包含公共标签 `host`、`region`，以及以下构建标签：
+
+| 标签 | 含义 |
+| --- | --- |
+| `version` | bamai 发布版本，与 `/version` 中的 `version` 一致 |
+| `git_commit` | 构建的 Git 标识，与 `/version` 中的 `git_commit` 一致；不保证是完整 SHA |
+| `git_tree_state` | 构建时的工作区状态：`clean`、`dirty` 或 `unknown` |
+
+未提供发布版本或 Git 标识的开发构建使用 `(devel)`。构建标签只附加到该指标，
+业务指标的标签保持不变。Prometheus 抓取后，可通过相同的 `job`、`instance`
+将构建信息与业务指标关联；跨集群查询还需纳入实际用于区分目标的集群标签。
+
 ## CPU
 
 ### 调度延迟

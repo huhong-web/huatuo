@@ -12,15 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// Package runtime registers Go runtime and process-level Prometheus
-// collectors (memory, GC, file descriptors, CPU time, etc.) under the
-// HuaTuo metrics namespace.
+// Package runtime registers process, Go runtime, and application build metrics.
 package runtime
 
 import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/collectors"
 
+	"github.com/ccfos/huatuo/internal/version"
 	"github.com/ccfos/huatuo/pkg/metric"
 )
 
@@ -29,7 +28,8 @@ import (
 // they share a consistent prefix with the rest of the HuaTuo metrics.
 // All registered metrics carry host and region labels for unified
 // dashboard variable filtering.
-func RegisterCollector(reg *prometheus.Registry, namespace string) {
+// A non-nil info also registers a constant build_info gauge for the application.
+func RegisterCollector(reg *prometheus.Registry, namespace string, info *version.Info) {
 	prefix := ""
 	if namespace != "" {
 		prefix = namespace + "_"
@@ -42,4 +42,16 @@ func RegisterCollector(reg *prometheus.Registry, namespace string) {
 
 	labeledReg.MustRegister(collectors.NewProcessCollector(collectors.ProcessCollectorOpts{}))
 	labeledReg.MustRegister(collectors.NewGoCollector())
+
+	if info != nil {
+		labeledReg.MustRegister(prometheus.NewGaugeFunc(prometheus.GaugeOpts{
+			Name: "build_info",
+			Help: "Build information for the application.",
+			ConstLabels: prometheus.Labels{
+				"version":        info.Version,
+				"git_commit":     info.GitCommit,
+				"git_tree_state": info.GitTreeState,
+			},
+		}, func() float64 { return 1 }))
+	}
 }

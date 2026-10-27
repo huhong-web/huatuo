@@ -26,6 +26,16 @@ BlackList = ["memory_threshold_snapshot", "metax_gpu", "ascend_npu", "softlockup
 EOF
 }
 
+# The build-info test supplies its isolated HTTP address.
+write_build_info_config() {
+	write_default_config
+	cat >> "${HUATUO_BAMAI_TEST_TMPDIR}/bamai.conf" << EOF
+
+[HTTPServer]
+    ListenAddress = "${HUATUO_BAMAI_ADDR#http://}"
+EOF
+}
+
 # write_include_filter_config writes a config with metric include filters.
 write_include_filter_config() {
 	cat > "${HUATUO_BAMAI_TEST_TMPDIR}/bamai.conf" << 'EOF'
