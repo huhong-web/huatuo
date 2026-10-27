@@ -15,7 +15,7 @@
 # limitations under the License.
 #
 
-# Purpose: Prepare the guest test environment and run Huatuo e2e tests in /mnt/host.
+# Purpose: Prepare the guest and run complete integration/E2E Shell suites in /mnt/host.
 # Caller: qemu-2-run-in-vm.sh streams this helper to the guest over SSH.
 # Environment:
 # - HOME: Used to add the user's Go binary directory to PATH.
@@ -23,7 +23,7 @@
 # Parameters:
 # - Optional --prepare-only or --test-only; omitted runs both phases.
 # Examples:
-# - run-in-vm.sh  # prepare the guest and run make test
+# - run-in-vm.sh  # prepare the guest and run make --keep-going integration e2e
 
 set -euo pipefail
 
@@ -244,6 +244,9 @@ stop_storage_image_prefetch() {
 }
 
 run_guest_tests() {
+	local -a test_make_args=("${@:2}")
+	# Sourced helper fixtures retain their default test target.
+	((${#test_make_args[@]})) || test_make_args=(test)
 	configure_proxy
 	export PATH="/usr/local/go/bin:${HOME}/go/bin:${PATH}"
 	export GOCACHE=/root/.cache/go-build
@@ -270,20 +273,23 @@ run_guest_tests() {
 	# This is the single entry point for all guest test targets.
 	vm_log '⬅️⬅️⬅️ Running tests...'
 
-	# Hide image downloads behind compilation and unit tests. Compatibility cases
+	# Hide image downloads behind compilation and test execution. Compatibility cases
 	# still perform their normal pull checks, including when prefetch fails.
 	storage_prefetch_pids=()
 	trap stop_storage_image_prefetch EXIT
 	prefetch_storage_images
 	make install-tools
 	if [[ -f _output/portable-generated.commit ]]; then
-		make test SKIP_PORTABLE_GENERATION=1
+		make "${test_make_args[@]}" SKIP_PORTABLE_GENERATION=1
 	else
-		make test
+		make "${test_make_args[@]}"
 	fi
 
 	vm_log '✅✅✅ Tests passed.'
 }
 
 # Also support sourcing the entry function in local regression fixtures.
-if [[ ${BASH_SOURCE[0]:-$0} == "$0" ]]; then run_guest_tests "$@"; fi
+if [[ ${BASH_SOURCE[0]:-$0} == "$0" ]]; then
+	# Keep running the E2E suite even when an integration scenario fails.
+	run_guest_tests "${1:-}" --keep-going integration e2e
+fi
