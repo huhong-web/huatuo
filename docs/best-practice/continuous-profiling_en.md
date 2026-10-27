@@ -388,6 +388,8 @@ The remote type is `memory:physical_usage:bytes:space:bytes`. Each output period
 
 Local SVG and collapsed stacks show the final accumulated result; JSON retains signed deltas per period. Fully canceled samples still produce a valid empty result. If no samples were ever received, no local display file is created.
 
+Page migration does not transfer the tracked allocation record from the old physical page to the new one. The new physical page can remain resident without a record; the old record may remain if mapping removal runs outside the target task. Running the integration test exclusively reduces test interference; it does not correct production accounting.
+
 Cross-period stack matching, detection of actual and partial physical-page frees, and collection of remaining data at normal shutdown still require validation and improvement. Current results must not be treated as exact physical residency. Memory usage for high-cardinality collection also grows with the number of distinct samples.
 
 ### Task Completion

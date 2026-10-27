@@ -560,7 +560,16 @@ wait_for() {
  echo "timed out: $1" >&2; return 1
 }
 if [[ $TEST_MODE == profiler ]]; then
- if [[ $name == test_profiler_* && $name != test_profiler_native_cpu_hardware_pmu.sh ]]; then
+ exec 7> "$TEST_STATE/active-cases"
+ case $name in
+  test_profiler_native_cpu_hardware_pmu.sh|test_profiler_native_memory_physical_usage.sh)
+   lock_mode=-xn;;
+  *) lock_mode=-sn;;
+ esac
+ lock_status=0
+ flock "$lock_mode" 7 || lock_status=$?
+ assert_eq "$lock_status" 0 "$name: overlapping exclusive case"
+ if [[ $name == test_profiler_* && $name != test_profiler_native_cpu_hardware_pmu.sh && $name != test_profiler_native_memory_physical_usage.sh ]]; then
   exec 8> "$TEST_STATE/profiler-slot-1"
   exec 9> "$TEST_STATE/profiler-slot-2"
   flock -n 8 || flock -n 9 || fatal "more than two profiler fixtures overlap"
@@ -586,6 +595,11 @@ if [[ $TEST_MODE == profiler ]]; then
   test_profiler_native_cpu_hardware_pmu.sh)
    [[ -f $TEST_STATE/first-done && -f $TEST_STATE/second-done && -f $TEST_STATE/third-done && -f $TEST_STATE/fourth-done ]]
    touch "$TEST_STATE/exclusive-done";;
+  test_profiler_native_memory_physical_usage.sh)
+   for marker in pool-done first-done second-done third-done fourth-done; do
+    assert_eq "$([[ -f $TEST_STATE/$marker ]] && echo ready || echo missing)" ready "$name: $marker must precede exclusive execution"
+   done
+   touch "$TEST_STATE/physical-usage-done";;
  esac
  exit 0
 fi
@@ -658,6 +672,7 @@ for runner_mode in refill resource storage profiler failure skip serial repeated
 	profiler)
 		runner_jobs=3
 		runner_names=(test_metrics.sh test_profiler_java_cpu_multi_pid.sh test_profiler_java_memory_usage_alloc.sh test_profiler_native_cpu.sh test_profiler_native_cpu_cpp_symbols.sh test_profiler_native_cpu_hardware_pmu.sh)
+		runner_names+=(test_profiler_native_memory_physical_usage.sh)
 		;;
 	serial) runner_jobs=1 ;;
 	repeated) runner_repeats=2 ;;
@@ -689,6 +704,9 @@ for runner_mode in refill resource storage profiler failure skip serial repeated
 			grep -Fq 'subject=fixture phase=verification duration=' "${runner_state}/test.log" || fatal "timing log missing"
 		fi
 		[[ -f ${runner_state}/exclusive-done && ! -e ${runner_state}/workspace ]] || fatal "${runner_mode}: exclusive case or cleanup missing"
+		if [[ ${runner_mode} == profiler ]]; then
+			assert_eq "$([[ -f ${runner_state}/physical-usage-done ]] && echo done || echo missing)" done "physical usage exclusive fixture completed"
+		fi
 	fi
 done
 log_info "scheduler refill, resource exclusion, failure draining, skips and cleanup passed"
