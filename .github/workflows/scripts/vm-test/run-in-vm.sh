@@ -15,7 +15,7 @@
 # limitations under the License.
 #
 
-# Purpose: Prepare the guest test environment and run Huatuo e2e tests in /mnt/host.
+# Purpose: Prepare the guest and run integration tests with eight workers.
 # Caller: qemu-2-run-in-vm.sh streams this helper to the guest over SSH.
 # Environment:
 # - HOME: Used to add the user's Go binary directory to PATH.
@@ -23,7 +23,7 @@
 # Parameters:
 # - Optional --prepare-only or --test-only; omitted runs both phases.
 # Examples:
-# - run-in-vm.sh  # prepare the guest and run make test
+# - run-in-vm.sh  # prepare the guest and run the parallel integration suite
 
 set -euo pipefail
 
@@ -268,23 +268,33 @@ run_guest_tests() {
 	ls -alh .
 	git config --global --add safe.directory /mnt/host
 
-	# This is the single entry point for all guest test targets.
+	# Direct CI execution selects integration; sourced callers keep their contract.
 	vm_log '⬅️⬅️⬅️ Running tests...'
 
-	# Hide image downloads behind compilation and unit tests. Compatibility cases
+	# Hide image downloads behind compilation and integration. Compatibility cases
 	# still perform their normal pull checks, including when prefetch fails.
 	storage_prefetch_pids=()
 	trap stop_storage_image_prefetch EXIT
 	prefetch_storage_images
 	make install-tools
+	local make_target=test
+	if [[ ${vm_parallel_integration:-false} == true ]]; then make_target=build; fi
 	if [[ -f _output/portable-generated.commit ]]; then
-		make test SKIP_PORTABLE_GENERATION=1
+		make "${make_target}" SKIP_PORTABLE_GENERATION=1
 	else
-		make test
+		make "${make_target}"
+	fi
+	if [[ ${vm_parallel_integration:-false} == true ]]; then
+		local -a integration_cases=(integration/test_*.sh)
+		vm_log "integration workers=8 expected_cases=${#integration_cases[@]} harness=$(git rev-parse HEAD)"
+		bash integration/run.sh -j 8 | tee _output/fedora44-integration.log
 	fi
 
 	vm_log '✅✅✅ Tests passed.'
 }
 
-# Also support sourcing the entry function in local regression fixtures.
-if [[ ${BASH_SOURCE[0]:-$0} == "$0" ]]; then run_guest_tests "$@"; fi
+# Keep the experiment flag out of child cases, including guest-entry self-tests.
+if [[ ${BASH_SOURCE[0]:-$0} == "$0" ]]; then
+	declare +x vm_parallel_integration=true
+	run_guest_tests "$@"
+fi
