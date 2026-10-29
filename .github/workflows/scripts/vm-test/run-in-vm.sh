@@ -15,7 +15,7 @@
 # limitations under the License.
 #
 
-# Purpose: Prepare the guest and run integration tests with eight workers.
+# Purpose: Prepare the guest and run the Fedora44 serial API diagnostic.
 # Caller: qemu-2-run-in-vm.sh streams this helper to the guest over SSH.
 # Environment:
 # - HOME: Used to add the user's Go binary directory to PATH.
@@ -23,7 +23,7 @@
 # Parameters:
 # - Optional --prepare-only or --test-only; omitted runs both phases.
 # Examples:
-# - run-in-vm.sh  # prepare the guest and run the parallel integration suite
+# - run-in-vm.sh  # prepare the guest and run the serial API diagnostic
 
 set -euo pipefail
 
@@ -278,16 +278,36 @@ run_guest_tests() {
 	prefetch_storage_images
 	make install-tools
 	local make_target=test
-	if [[ ${vm_parallel_integration:-false} == true ]]; then make_target=build; fi
+	if [[ ${vm_integration_diagnostic:-false} == true ]]; then make_target=build; fi
 	if [[ -f _output/portable-generated.commit ]]; then
 		make "${make_target}" SKIP_PORTABLE_GENERATION=1
 	else
 		make "${make_target}"
 	fi
-	if [[ ${vm_parallel_integration:-false} == true ]]; then
-		local -a integration_cases=(integration/test_*.sh)
-		vm_log "integration workers=8 expected_cases=${#integration_cases[@]} harness=$(git rev-parse HEAD)"
-		bash integration/run.sh -j 8 | tee _output/fedora44-integration.log
+	if [[ ${vm_integration_diagnostic:-false} == true ]]; then
+		local diagnostic_status=0 diagnostic_workspace diagnostic_file
+		local diagnostic_log=_output/fedora44-api-serial.log
+		vm_log "integration diagnostic workers=1 expected_cases=1 script=test_apiserver_continuous_profiling_api.sh harness=$(git rev-parse HEAD)"
+		free -h || true
+		docker ps --format '{{.ID}} {{.Image}} {{.Status}}' || true
+		bash integration/run.sh -j 1 test_apiserver_continuous_profiling_api.sh 2>&1 | tee "${diagnostic_log}" || diagnostic_status=$?
+		free -h || true
+		docker ps --format '{{.ID}} {{.Image}} {{.Status}}' || true
+		if ((diagnostic_status != 0)); then
+			# The runner prints only log heads; late service failures need the tails.
+			diagnostic_workspace=$(sed -n 's@.*artifacts preserved at \(/tmp/huatuo-test\.[[:alnum:]]*/test_apiserver_continuous_profiling_api\.[[:alnum:]]*\)$@\1@p' "${diagnostic_log}" | tail -n 1) || true
+			if [[ -n ${diagnostic_workspace} && -d ${diagnostic_workspace} ]]; then
+				while IFS= read -r -d '' diagnostic_file; do
+					vm_log "diagnostic tail: ${diagnostic_file}"
+					tail -n 200 "${diagnostic_file}" || true
+					grep -Ein 'out.of.memory|killed process|oom|gc overhead|rejected|circuit.break|heap_size|ml.max_jvm_size' "${diagnostic_file}" || true
+				done < <(find "${diagnostic_workspace}" -type f -name '*.log' -print0)
+			else
+				vm_log 'diagnostic gap: runner did not retain the expected case workspace'
+			fi
+			dmesg --ctime | grep -Ei 'out.of.memory|killed process|oom' || true
+			return "${diagnostic_status}"
+		fi
 	fi
 
 	vm_log '✅✅✅ Tests passed.'
@@ -295,6 +315,6 @@ run_guest_tests() {
 
 # Keep the experiment flag out of child cases, including guest-entry self-tests.
 if [[ ${BASH_SOURCE[0]:-$0} == "$0" ]]; then
-	declare +x vm_parallel_integration=true
+	declare +x vm_integration_diagnostic=true
 	run_guest_tests "$@"
 fi
