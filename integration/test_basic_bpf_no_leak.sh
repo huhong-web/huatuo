@@ -33,25 +33,36 @@ bpf_leak_kinds=(prog map perf)
 bpf_leak_deadline=0
 trap huatuo_bamai_stop EXIT
 
+bpf_leak_query_retryable() {
+	local kind=$1 output=$2
+	jq -e --arg kind "${kind}" '
+		type == "array" and
+		([.[] | .error? // empty] | length > 0 and all(.[];
+			if $kind == "perf" then . == "No such process"
+			elif $kind == "link" then
+				type == "string" and endswith(": Resource temporarily unavailable")
+			else false end))' "${output}" > /dev/null 2>&1
+}
+
 bpf_leak_query() {
 	local kind=$1 destination=$2 attempt budget
 	for attempt in 1 2 3; do
 		budget=10
 		if ((bpf_leak_deadline > 0)); then
 			budget=$((bpf_leak_deadline - SECONDS))
-			((budget > 0)) || fatal "BPF reclamation deadline exceeded; see ${BPF_LEAK_DIR}"
+			((budget > 0)) || fatal "BPF query deadline exceeded; see ${BPF_LEAK_DIR}"
 			((budget <= 10)) || budget=10
 		fi
 		if LC_ALL=C timeout --signal=KILL "${budget}s" bpftool -j "${kind}" show \
 			> "${destination}" 2> "${destination}.stderr"; then
 			break
 		fi
-		# Old bpftool may lose a process while scanning perf FDs. Retry that scan only.
-		if [[ ${kind} != perf || ${attempt} == 3 || -s "${destination}.stderr" ]] || ! jq -e \
-			'type == "array" and [.[] | .error? // empty] == ["No such process"]' \
-			"${destination}" > /dev/null 2>&1; then
+		# A process can exit during perf scans; a new link may not be settled yet.
+		if [[ ${attempt} == 3 || -s "${destination}.stderr" ]] \
+			|| ! bpf_leak_query_retryable "${kind}" "${destination}"; then
 			fatal "bpftool ${kind} show failed (attempt ${attempt}); see ${destination}{,.stderr}"
 		fi
+		log_info "retrying transient bpftool ${kind} query failure (attempt ${attempt}/3)"
 	done
 	jq -e --arg kind "${kind}" 'type == "array" and all(.[];
 		if $kind == "perf" then
@@ -118,6 +129,7 @@ bpf_leak_resources_reclaimed() {
 }
 
 assert_bpf_loaded() {
+	bpf_leak_deadline=$((SECONDS + WAIT_HUATUO_BAMAI_TIMEOUT))
 	wait_until "${WAIT_HUATUO_BAMAI_TIMEOUT}" 1 bpf_leak_resources_loaded \
 		|| fatal "expected loaded and attached bamai BPF; see ${BPF_LEAK_DIR}"
 	log_info "bamai BPF IDs before SIGTERM: $(jq -c . "${BPF_LEAK_DIR}/owned.json")"
