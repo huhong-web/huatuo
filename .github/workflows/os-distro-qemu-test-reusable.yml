@@ -124,7 +124,8 @@ jobs:
 
       - name: Prepare VM
         id: prepare-in-vm
-        timeout-minutes: 20
+        # Full-suite RPM metadata exceeded 20 minutes on the openEuler mirrors.
+        timeout-minutes: ${{ startsWith(matrix.os, 'openeuler') && 45 || 20 }}
         run: .github/workflows/scripts/qemu-2-run-in-vm.sh --prepare-only
 
       - name: Read VM Go cache key
@@ -174,7 +175,8 @@ jobs:
 
       - name: Run in VM
         id: run-in-vm
-        timeout-minutes: 90
+        # Run every scenario serially, retaining failures for the final result.
+        timeout-minutes: 180
         run: |
           .github/workflows/scripts/qemu-2-run-in-vm.sh --test-only
 

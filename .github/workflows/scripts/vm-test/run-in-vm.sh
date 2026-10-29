@@ -15,7 +15,7 @@
 # limitations under the License.
 #
 
-# Purpose: Prepare the guest test environment and run Huatuo e2e tests in /mnt/host.
+# Purpose: Prepare the guest and run every integration scenario individually.
 # Caller: qemu-2-run-in-vm.sh streams this helper to the guest over SSH.
 # Environment:
 # - HOME: Used to add the user's Go binary directory to PATH.
@@ -23,7 +23,7 @@
 # Parameters:
 # - Optional --prepare-only or --test-only; omitted runs both phases.
 # Examples:
-# - run-in-vm.sh  # prepare the guest and run make test
+# - run-in-vm.sh  # prepare the guest and run the integration suite
 
 set -euo pipefail
 
@@ -163,19 +163,13 @@ install_test_dependencies() {
 		if [[ "$os_id" == rocky ]]; then
 			package_options+=(--disablerepo='epel*')
 		fi
-		# openEuler publishes kernel-devel/kernel-headers in its binary OS
-		# repositories. Its update and everything repositories carry very
-		# large metadata (tens of MB) served by slow mirrors, so skip them
-		# and only fall back to the full set if a build dependency is missing
-		# from the restricted repositories.
+		# The full suite needs fio from everything. Avoid downloading unrelated
+		# source, debug and EPOL metadata when the OS repository lacks a package.
 		if [[ "$os_id" == openeuler ]]; then
-			package_options+=(
-				--disablerepo=EPOL --disablerepo=debuginfo --disablerepo=source
-				--disablerepo=update-source --disablerepo=update
-				--disablerepo=everything
-			)
+			package_options+=(--disablerepo='*' --enablerepo=OS --enablerepo=everything)
 		fi
 		if ! "$package_manager" "${package_options[@]}" install -y "${missing_packages[@]}"; then
+			[[ "$os_id" != openeuler ]] || return 1
 			((${#package_options[@]})) || return 1
 			vm_log "install with restricted repositories failed; retrying with all repositories"
 			"$package_manager" install -y "${missing_packages[@]}"
@@ -243,6 +237,43 @@ stop_storage_image_prefetch() {
 	exit "${status}"
 }
 
+# The runner prints log heads; retain late service errors before VM cleanup.
+dump_integration_failure_logs() {
+	local case_log=$1 workspace logfile
+	while IFS= read -r workspace; do
+		[[ -d "$workspace" ]] || continue
+		while IFS= read -r -d '' logfile; do
+			vm_log "failure log tail: $logfile"
+			tail -n 200 "$logfile" || true
+		done < <(find "$workspace" -type f -name '*.log' -print0)
+	done < <(awk '/artifacts preserved at / {print $NF}' "$case_log" | sort -u)
+}
+
+run_full_integration() {
+	local script case_log status completed=0 failures=0
+	local -a scripts=(integration/test_*.sh)
+	[[ -f "${scripts[0]}" ]] || {
+		vm_log_error "no integration scripts selected"
+		return 1
+	}
+	mkdir -p _output/full-integration
+	vm_log "harness=$(git rev-parse HEAD) integration workers=1 expected_cases=${#scripts[@]}"
+	for script in "${scripts[@]}"; do
+		case_log="_output/full-integration/${script##*/}.log"
+		status=0
+		vm_log "integration case begin=${script##*/}"
+		bash integration/run.sh -j 1 "${script##*/}" 2>&1 | tee "$case_log" || status=$?
+		completed=$((completed + 1))
+		vm_log "integration case end=${script##*/} runner_status=$status"
+		if ((status != 0)); then
+			failures=$((failures + 1))
+			dump_integration_failure_logs "$case_log"
+		fi
+	done
+	vm_log "integration selected=${#scripts[@]} executed=$completed failed_runs=$failures"
+	((failures == 0))
+}
+
 run_guest_tests() {
 	configure_proxy
 	export PATH="/usr/local/go/bin:${HOME}/go/bin:${PATH}"
@@ -268,23 +299,29 @@ run_guest_tests() {
 	ls -alh .
 	git config --global --add safe.directory /mnt/host
 
-	# This is the single entry point for all guest test targets.
+	# Sourced regression fixtures retain the normal make-test contract.
 	vm_log '⬅️⬅️⬅️ Running tests...'
 
-	# Hide image downloads behind compilation and unit tests. Compatibility cases
+	# Hide image downloads behind compilation and integration. Compatibility cases
 	# still perform their normal pull checks, including when prefetch fails.
 	storage_prefetch_pids=()
 	trap stop_storage_image_prefetch EXIT
 	prefetch_storage_images
 	make install-tools
+	local make_target=test
+	if [[ ${vm_full_integration:-false} == true ]]; then make_target=build; fi
 	if [[ -f _output/portable-generated.commit ]]; then
-		make test SKIP_PORTABLE_GENERATION=1
+		make "${make_target}" SKIP_PORTABLE_GENERATION=1
 	else
-		make test
+		make "${make_target}"
 	fi
+	if [[ ${vm_full_integration:-false} == true ]]; then run_full_integration; fi
 
 	vm_log '✅✅✅ Tests passed.'
 }
 
-# Also support sourcing the entry function in local regression fixtures.
-if [[ ${BASH_SOURCE[0]:-$0} == "$0" ]]; then run_guest_tests "$@"; fi
+# Keep the CI selection out of child cases, including guest-entry self-tests.
+if [[ ${BASH_SOURCE[0]:-$0} == "$0" ]]; then
+	declare +x vm_full_integration=true
+	run_guest_tests "$@"
+fi
