@@ -15,7 +15,7 @@
 # limitations under the License.
 #
 
-# Purpose: Prepare the guest test environment and run Huatuo e2e tests in /mnt/host.
+# Purpose: Prepare the guest and run the selected BPF reclamation test.
 # Caller: qemu-2-run-in-vm.sh streams this helper to the guest over SSH.
 # Environment:
 # - HOME: Used to add the user's Go binary directory to PATH.
@@ -23,7 +23,7 @@
 # Parameters:
 # - Optional --prepare-only or --test-only; omitted runs both phases.
 # Examples:
-# - run-in-vm.sh  # prepare the guest and run make test
+# - run-in-vm.sh  # prepare the guest and run the selected Shell test
 
 set -euo pipefail
 
@@ -221,28 +221,6 @@ install_temporary_go_tools() {
 	done
 }
 
-prefetch_storage_images() {
-	source integration/lib_storage.sh
-	local image
-	mkdir -p _output/storage-image-prefetch
-	for image in "${STORAGE_ES7_IMAGE}" "${STORAGE_OPENSEARCH_IMAGE}"; do
-		vm_log "preloading storage image: ${image}"
-		timeout 5m docker pull "${image}" > "_output/storage-image-prefetch/${image##*/}.log" 2>&1 &
-		storage_prefetch_pids+=("$!")
-	done
-}
-
-stop_storage_image_prefetch() {
-	local status=$? pid
-	trap - EXIT
-	for pid in "${storage_prefetch_pids[@]}"; do
-		# Only signal jobs still owned by this shell; completed PIDs may be reused.
-		if jobs -pr | grep -qx "${pid}"; then kill "${pid}" 2> /dev/null || true; fi
-		wait "${pid}" 2> /dev/null || vm_log "storage image prefetch did not finish successfully; see _output/storage-image-prefetch"
-	done
-	exit "${status}"
-}
-
 run_guest_tests() {
 	configure_proxy
 	export PATH="/usr/local/go/bin:${HOME}/go/bin:${PATH}"
@@ -258,30 +236,20 @@ run_guest_tests() {
 	if [[ ! -f _output/portable-generated.commit ]]; then
 		install_temporary_go_tools
 	fi
-	export JAVA_PROFILER_DOCKER_IMAGE=eclipse-temurin:17-jdk
-	export JAVA_PROFILER_CONTAINERD_IMAGE=docker.io/library/eclipse-temurin:17-jdk
-	export NATIVE_PROFILER_DOCKER_IMAGE=busybox:1.36.1
-	export NATIVE_PROFILER_CONTAINERD_IMAGE=docker.io/library/busybox:1.36.1
-	export NATIVE_PROFILER_TEST_PRIVILEGED_CONTAINER=1
 
 	pwd
 	ls -alh .
 	git config --global --add safe.directory /mnt/host
 
-	# This is the single entry point for all guest test targets.
-	vm_log '⬅️⬅️⬅️ Running tests...'
-
-	# Hide image downloads behind compilation and unit tests. Compatibility cases
-	# still perform their normal pull checks, including when prefetch fails.
-	storage_prefetch_pids=()
-	trap stop_storage_image_prefetch EXIT
-	prefetch_storage_images
-	make install-tools
+	# Prepare binaries without running Go tests or either full Shell suite.
 	if [[ -f _output/portable-generated.commit ]]; then
-		make test SKIP_PORTABLE_GENERATION=1
+		make build SKIP_PORTABLE_GENERATION=1
 	else
-		make test
+		make build
 	fi
+	vm_log "harness=$(git rev-parse HEAD) selected=test_basic_bpf_no_leak.sh"
+	bash integration/run.sh test_basic_bpf_no_leak.sh | tee _output/bpf-no-leak-ci.log
+	grep -F 'summary: total=1 passed=1 skipped=0 failed=0' _output/bpf-no-leak-ci.log
 
 	vm_log '✅✅✅ Tests passed.'
 }
