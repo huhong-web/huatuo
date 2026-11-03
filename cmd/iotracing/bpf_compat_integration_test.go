@@ -134,9 +134,9 @@ func TestIOTracingBlockDevice(t *testing.T) {
 				// Keep references valid without exposing the legacy name to CO-RE.
 				// Reparse the BTF to rebuild its type-name index after renaming.
 				var types []btf.Type
-				iter := target.Iterate()
-				for iter.Next() {
-					switch typ := iter.Type.(type) {
+				for typ, err := range target.All() {
+					require.NoError(t, err)
+					switch typ := typ.(type) {
 					case *btf.Struct:
 						if typ.Name == "hd_struct" {
 							typ.Name = "unavailable_partition"
@@ -146,7 +146,7 @@ func TestIOTracingBlockDevice(t *testing.T) {
 							typ.Name = "unavailable_partition"
 						}
 					}
-					types = append(types, iter.Type)
+					types = append(types, typ)
 				}
 				builder, err := btf.NewBuilder(types)
 				require.NoError(t, err)
@@ -168,10 +168,14 @@ func TestIOTracingBlockDevice(t *testing.T) {
 				}
 			}
 			require.Len(t, spec.Programs, 2)
-			require.NoError(t, spec.RewriteConstants(map[string]any{bpfRequestPartBlockDevice: blockDevice}))
+			requireIOTracingTestConstants(t, spec, map[string]any{bpfRequestPartBlockDevice: blockDevice})
 			// Qualify CO-RE and both block programs without attaching a fake layout.
 			collection, err := ebpf.NewCollectionWithOptions(spec, ebpf.CollectionOptions{
-				Programs: ebpf.ProgramOptions{KernelTypes: target},
+				Programs: ebpf.ProgramOptions{
+					KernelTypes: target,
+					// Synthetic vmlinux BTF cannot rebase real split-module BTF.
+					KernelModuleTypes: map[string]*btf.Spec{},
+				},
 			})
 			require.NoError(t, err)
 			t.Cleanup(collection.Close)
@@ -193,11 +197,11 @@ func TestIOTracingBlockDevice(t *testing.T) {
 		copy(ids[:], devices)
 		blockDevice, loadErr := requestPartIsBlockDevice()
 		require.NoError(t, loadErr)
-		require.NoError(t, spec.RewriteConstants(map[string]any{
+		requireIOTracingTestConstants(t, spec, map[string]any{
 			"FILTER_DEV_COUNT":        uint32(len(devices)),
 			"FILTER_DEV_IDS":          ids,
 			bpfRequestPartBlockDevice: blockDevice,
-		}))
+		})
 		coll, loadErr := ebpf.NewCollection(spec)
 		require.NoError(t, loadErr, "production block programs must relocate and load")
 		t.Cleanup(coll.Close)

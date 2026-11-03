@@ -125,11 +125,25 @@ func loadBPFFromReader(bpfName string, rd io.ReaderAt, consts map[string]any) (B
 }
 
 func loadBPFFromCollectionSpec(bpfName string, specs *ebpf.CollectionSpec, consts map[string]any) (BPF, error) {
-	// RewriteConstants
-	if consts != nil {
-		if err := specs.RewriteConstants(consts); err != nil {
-			return nil, fmt.Errorf("rewrite constants: %w", err)
+	var missing []string
+	for name, value := range consts {
+		variable, ok := specs.Variables[name]
+		if !ok {
+			missing = append(missing, name)
+			continue
 		}
+
+		if !variable.Constant() {
+			return nil, fmt.Errorf("rewrite constant %q: variable is not read-only", name)
+		}
+
+		if err := variable.Set(value); err != nil {
+			return nil, fmt.Errorf("rewrite constant %q: %w", name, err)
+		}
+	}
+
+	if len(missing) != 0 {
+		return nil, fmt.Errorf("rewrite constants: %w", &ebpf.MissingConstantsError{Constants: missing})
 	}
 
 	// loads Maps and Programs into the kernel.

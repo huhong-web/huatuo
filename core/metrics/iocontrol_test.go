@@ -1520,3 +1520,13 @@ func cleanupIOControlKernelCommand(name string, arguments ...string) error {
 	}
 	return nil
 }
+
+func requireIOControlTestConstants(t *testing.T, spec *ebpf.CollectionSpec, constants map[string]any) {
+	t.Helper()
+	for name, value := range constants {
+		variable := spec.Variables[name]
+		require.NotNil(t, variable, "BPF constant %s", name)
+		require.True(t, variable.Constant(), "BPF variable %s must be read-only", name)
+		require.NoError(t, variable.Set(value), "set BPF constant %s", name)
+	}
+}

@@ -158,10 +158,10 @@ func TestIOTracingFilemapCapacity(t *testing.T) {
 		require.NotNil(t, spec.Maps[bpfSourceMapName])
 		require.Equal(t, uint32(512), spec.Maps[bpfSourceMapName].MaxEntries)
 		require.NotNil(t, spec.Maps["io_source_full"], "capacity qualification requires io_source_full")
-		require.NoError(t, spec.RewriteConstants(map[string]any{
+		requireIOTracingTestConstants(t, spec, map[string]any{
 			"FILTER_DEV_COUNT": uint32(1),
 			"FILTER_DEV_IDS":   [16]uint32{files[0].key.Dev},
-		}))
+		})
 		coll, err := ebpf.NewCollection(spec)
 		require.NoError(t, err)
 		t.Cleanup(coll.Close)
@@ -332,10 +332,10 @@ func TestIOTracingFilemapDeviceFilter(t *testing.T) {
 			delete(spec.Programs, name)
 		}
 	}
-	require.NoError(t, spec.RewriteConstants(map[string]any{
+	requireIOTracingTestConstants(t, spec, map[string]any{
 		"FILTER_DEV_COUNT": uint32(1),
 		"FILTER_DEV_IDS":   [16]uint32{key.Dev},
-	}))
+	})
 	coll, err := ebpf.NewCollection(spec)
 	require.NoError(t, err)
 	t.Cleanup(coll.Close)
@@ -451,10 +451,10 @@ func TestIOTracingReadWrite(t *testing.T) {
 		}
 	}
 	require.Len(t, spec.Programs, 2)
-	require.NoError(t, spec.RewriteConstants(map[string]any{
+	requireIOTracingTestConstants(t, spec, map[string]any{
 		"FILTER_DEV_COUNT": uint32(1),
 		"FILTER_DEV_IDS":   [16]uint32{key.Dev},
-	}))
+	})
 	coll, err := ebpf.NewCollection(spec)
 	require.NoError(t, err, "production read/write programs must relocate and load")
 	t.Cleanup(coll.Close)
@@ -646,10 +646,10 @@ func TestIOTracingFileMetadata(t *testing.T) {
 				}
 			}
 			require.Len(t, spec.Programs, 1)
-			require.NoError(t, spec.RewriteConstants(map[string]any{
+			requireIOTracingTestConstants(t, spec, map[string]any{
 				"FILTER_DEV_COUNT": uint32(1),
 				"FILTER_DEV_IDS":   [16]uint32{files[0].key.Dev},
-			}))
+			})
 			coll, err := ebpf.NewCollection(spec)
 			require.NoError(t, err, "production file program must relocate and load")
 			t.Cleanup(coll.Close)
@@ -733,4 +733,14 @@ func attachFileIOProbe(t *testing.T, name string, program *ebpf.Program) {
 		name,
 	)
 	t.Cleanup(func() { _ = probe.Close() })
+}
+
+func requireIOTracingTestConstants(t *testing.T, spec *ebpf.CollectionSpec, constants map[string]any) {
+	t.Helper()
+	for name, value := range constants {
+		variable := spec.Variables[name]
+		require.NotNil(t, variable, "BPF constant %s", name)
+		require.True(t, variable.Constant(), "BPF variable %s must be read-only", name)
+		require.NoError(t, variable.Set(value), "set BPF constant %s", name)
+	}
 }
