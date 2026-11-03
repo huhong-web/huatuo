@@ -47,7 +47,7 @@ integration_huatuo_bamai_start \
 	write_config_bamai_net_rx_latency \
 	--region dev \
 	--procfs-prefix "${HUATUO_BAMAI_TEST_FIXTURES}" \
-	--disable-kubelet
+	--disable-kubelet --log-debug
 
 SLOW_TCP_SERVER="${WORK_DIR}/slow-tcp-server"
 compile_user_fixture \
@@ -66,6 +66,15 @@ for i in $(seq 1 5); do
 		http://${NETNS_SERVER_ADDR}:${TEST_PORT}/ \
 		>> "${WORK_DIR}/curl.log" 2>&1 || fatal "curl request #${i} failed; see ${WORK_DIR}/curl.log"
 done
+
+# Diagnostic snapshot after the original requests; preserve all assertions.
+{
+	date -u
+	bpftool -j prog show > "${WORK_DIR}/programs.json"
+	jq -r '.[] | select(.name | test("^(netif_receive_s|skb_copy_datagr|tcp_v4_rcv)")) | .id' "${WORK_DIR}/programs.json" | while read -r prog_id; do
+		bpftool prog dump xlated id "$prog_id" > "${WORK_DIR}/program-${prog_id}.txt"
+	done
+} > "${WORK_DIR}/snapshot.log" 2>&1 || true
 
 EVENTS_FILE="${HUATUO_BAMAI_TEST_TMPDIR}/events/net_rx_latency"
 wait_until 5 0.1 net_rx_latency_event_is_stored || fatal "no matching net_rx_latency event persisted"
