@@ -1083,7 +1083,7 @@ func TestIOControlSingleLookupRequiresLegacyHashAllocator(t *testing.T) {
 		},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			builder, err := btf.NewBuilder(test.types)
+			builder, err := btf.NewBuilder(test.types, nil)
 			require.NoError(t, err)
 			raw, err := builder.Marshal(nil, nil)
 			require.NoError(t, err)
@@ -1110,7 +1110,7 @@ func TestIOControlMapAllocation(t *testing.T) {
 					Name: "pcpu_ma", Type: &btf.Struct{Name: "bpf_mem_alloc", Size: 8},
 				})
 			}
-			builder, err := btf.NewBuilder([]btf.Type{hash})
+			builder, err := btf.NewBuilder([]btf.Type{hash}, nil)
 			require.NoError(t, err)
 			raw, err := builder.Marshal(nil, nil)
 			require.NoError(t, err)
@@ -1519,4 +1519,14 @@ func cleanupIOControlKernelCommand(name string, arguments ...string) error {
 			strings.Join(arguments, " "), err, strings.TrimSpace(string(output)))
 	}
 	return nil
+}
+
+func requireIOControlTestConstants(t *testing.T, spec *ebpf.CollectionSpec, constants map[string]any) {
+	t.Helper()
+	for name, value := range constants {
+		variable := spec.Variables[name]
+		require.NotNil(t, variable, "BPF constant %s", name)
+		require.True(t, variable.Constant(), "BPF variable %s must be read-only", name)
+		require.NoError(t, variable.Set(value), "set BPF constant %s", name)
+	}
 }
