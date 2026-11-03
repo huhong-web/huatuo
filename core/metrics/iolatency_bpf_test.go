@@ -56,12 +56,10 @@ func TestIOLatencyStateMapABI(t *testing.T) {
 	if err != nil {
 		t.Fatalf("load iolatency BPF object: %v", err)
 	}
-	if err := spec.RewriteConstants(map[string]any{
+	requireIOControlTestConstants(t, spec, map[string]any{
 		ioLatencyRootBlkcg:    uint64(0xffffffff82003000),
 		ioLatencyBioTraceFlag: uint32(6),
-	}); err != nil {
-		t.Fatalf("rewrite root blkcg address: %v", err)
-	}
+	})
 	for _, want := range []ioControlTestMapContract{
 		{
 			name: ioControlStatusMap, typeID: ebpf.Array,
@@ -1780,7 +1778,7 @@ func TestIOLatencyKernelBTFStartup(t *testing.T) {
 
 func writeIOLatencyKernelBTF(t *testing.T, kernelTypes []btf.Type) {
 	t.Helper()
-	builder, err := btf.NewBuilder(kernelTypes)
+	builder, err := btf.NewBuilder(kernelTypes, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1829,7 +1827,7 @@ func TestIOLatencyBioTraceCompletion(t *testing.T) {
 					},
 				})
 			}
-			builder, err := btf.NewBuilder(candidates)
+			builder, err := btf.NewBuilder(candidates, nil)
 			require.NoError(t, err)
 			raw, err := builder.Marshal(nil, nil)
 			require.NoError(t, err)
@@ -1886,7 +1884,7 @@ func TestIOLatencyCryptoModeCount(t *testing.T) {
 			if test.isReversed {
 				slices.Reverse(candidates)
 			}
-			builder, err := btf.NewBuilder(candidates)
+			builder, err := btf.NewBuilder(candidates, nil)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -2330,12 +2328,10 @@ func TestIOLatencyKernelProbeObject(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := spec.RewriteConstants(map[string]any{
+	requireIOControlTestConstants(t, spec, map[string]any{
 		"io_latency_tfms_inited":  uint64(0xffff888000000000),
 		"io_latency_crypto_modes": uint32(5),
-	}); err != nil {
-		t.Fatal(err)
-	}
+	})
 	if program := spec.Programs["probe_crypto_fallback"]; program == nil ||
 		program.Type != ebpf.RawTracepoint || program.AttachTo != "sys_enter" {
 		t.Fatalf("crypto probe program = %#v", program)

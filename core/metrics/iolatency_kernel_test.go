@@ -148,9 +148,9 @@ func ioLatencyKernelRequiresQueueSamples(t *testing.T) bool {
 			hasTime = true
 		}
 	}
-	iter := spec.Iterate()
-	for iter.Next() {
-		if enum, ok := iter.Type.(*btf.Enum); ok {
+	for typ, err := range spec.All() {
+		require.NoError(t, err)
+		if enum, ok := typ.(*btf.Enum); ok {
 			for _, value := range enum.Values {
 				if value.Name == "QUEUE_FLAG_BIO_ISSUE_TIME" {
 					return false

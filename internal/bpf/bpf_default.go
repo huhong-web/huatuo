@@ -124,12 +124,36 @@ func loadBPFFromReader(bpfName string, rd io.ReaderAt, consts map[string]any) (B
 	return loadBPFFromCollectionSpec(bpfName, specs, consts)
 }
 
+// Keep aggregated missing-name diagnostics independent of removed library APIs.
+type missingConstantsError struct {
+	Constants []string
+}
+
+func (e *missingConstantsError) Error() string {
+	return "some constants are missing from .rodata: " + strings.Join(e.Constants, ", ")
+}
+
 func loadBPFFromCollectionSpec(bpfName string, specs *ebpf.CollectionSpec, consts map[string]any) (BPF, error) {
-	// RewriteConstants
-	if consts != nil {
-		if err := specs.RewriteConstants(consts); err != nil {
-			return nil, fmt.Errorf("rewrite constants: %w", err)
+	var missing []string
+	for name, value := range consts {
+		variable, ok := specs.Variables[name]
+		if !ok {
+			missing = append(missing, name)
+			continue
 		}
+
+		dataMap, hasDataMap := specs.Maps[variable.SectionName]
+		if !variable.Constant() || !hasDataMap || dataMap.Flags&unix.BPF_F_RDONLY_PROG == 0 {
+			return nil, fmt.Errorf("rewrite constant %q: variable is not read-only", name)
+		}
+
+		if err := variable.Set(value); err != nil {
+			return nil, fmt.Errorf("rewrite constant %q: %w", name, err)
+		}
+	}
+
+	if len(missing) != 0 {
+		return nil, fmt.Errorf("rewrite constants: %w", &missingConstantsError{Constants: missing})
 	}
 
 	// loads Maps and Programs into the kernel.

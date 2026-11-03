@@ -147,7 +147,13 @@ func TestBlkThrotlKernelThrottleLifecycle(t *testing.T) {
 			for _, item := range owners {
 				var owner blkThrotlTestBLKGOwner
 				require.NoError(t, decodeBPFMapData(item.Value, &owner))
-				if ioControlRetiredKey(owner) == retiredIdentity {
+				ownerIdentity := ioControlRetiredKey{
+					CSS:       owner.CSS,
+					CSSSerial: owner.CSSSerial,
+					Major:     owner.Major,
+					Minor:     owner.Minor,
+				}
+				if ownerIdentity == retiredIdentity {
 					hasOldOwner = true
 					break
 				}
