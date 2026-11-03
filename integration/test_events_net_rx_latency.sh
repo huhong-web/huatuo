@@ -47,7 +47,10 @@ integration_huatuo_bamai_start \
 	write_config_bamai_net_rx_latency \
 	--region dev \
 	--procfs-prefix "${HUATUO_BAMAI_TEST_FIXTURES}" \
-	--disable-kubelet
+	--disable-kubelet --log-debug
+
+# HTTP readiness precedes asynchronous BPF attachment.
+wait_until 10 0.1 grep -q 'attached BPF and created event pipe.*map_name="net_recv_lat_event_map"' "${HUATUO_BAMAI_TEST_TMPDIR}/huatuo.log" || fatal "net_rx_latency BPF did not attach"
 
 SLOW_TCP_SERVER="${WORK_DIR}/slow-tcp-server"
 compile_user_fixture \
