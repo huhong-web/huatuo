@@ -2649,7 +2649,7 @@ func TestIOCostObjectContract(t *testing.T) {
 	require.NotContains(t, spec.Maps, ioCostDiagnosticScratchMap)
 	requireIOCostProductionObjectExcludesDiagnostics(t, spec)
 	require.Equal(t, ioCostProductionRodataContract(), ioCostRodataContract(t, spec))
-	require.NoError(t, spec.RewriteConstants(ioCostTestKernelProfile(true).constants()))
+	requireIOControlTestConstants(t, spec, ioCostTestKernelProfile(true).constants())
 }
 
 func TestIOCostObject(t *testing.T) {
@@ -2903,7 +2903,7 @@ func testIOCostDiagnosticObjectContract(t *testing.T, spec *ebpf.CollectionSpec)
 	constants[ioCostDiagnosticMajorConstant] = uint32(8)
 	constants[ioCostDiagnosticFirstMinorConstant] = uint32(16)
 	constants[ioCostDiagnosticCSSSerialConstant] = uint64(0x1020304050607080)
-	require.NoError(t, spec.RewriteConstants(constants))
+	requireIOControlTestConstants(t, spec, constants)
 }
 
 func ioCostBusinessMapContracts() []ioControlTestMapContract {

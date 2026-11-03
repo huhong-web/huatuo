@@ -111,6 +111,71 @@ func TestLoadBPFFromBytes_InvalidName(t *testing.T) {
 	}
 }
 
+func TestLoadBPFFromCollectionSpec_Constants(t *testing.T) {
+	tests := []struct {
+		name        string
+		constants   map[string]any
+		writable    bool
+		wantError   string
+		wantMissing []string
+	}{
+		{
+			name:        "missing",
+			constants:   map[string]any{"missing_first": uint32(1), "missing_second": uint32(2)},
+			wantError:   "some constants are missing",
+			wantMissing: []string{"missing_first", "missing_second"},
+		},
+		{
+			name:      "wrong size",
+			constants: map[string]any{"target_key": uint64(1)},
+			wantError: "rewrite constant \"target_key\"",
+		},
+		{
+			name:      "writable",
+			constants: map[string]any{"target_key": uint32(1)},
+			writable:  true,
+			wantError: "variable is not read-only",
+		},
+		{
+			name:      "read-only value",
+			constants: map[string]any{"target_key": uint32(42)},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			spec, err := ebpf.LoadCollectionSpecFromReader(bytes.NewReader(loadMinimalObjBytes(t)))
+			require.NoError(t, err)
+			if tt.writable {
+				spec.Maps[".rodata"].Flags &^= unix.BPF_F_RDONLY_PROG
+			}
+
+			if tt.wantError == "" {
+				requireBPFPermission(t)
+			}
+
+			object, err := LoadBPFFromCollectionSpec("test_minimal.elf", spec, tt.constants)
+			if tt.wantError != "" {
+				require.ErrorContains(t, err, tt.wantError)
+				require.Nil(t, object)
+				if len(tt.wantMissing) != 0 {
+					var missing *ebpf.MissingConstantsError
+					require.ErrorAs(t, err, &missing)
+					require.ElementsMatch(t, tt.wantMissing, missing.Constants)
+				}
+				return
+			}
+			require.NoError(t, err)
+			t.Cleanup(func() { require.NoError(t, object.Close()) })
+			items, err := object.DumpMapByName(".rodata")
+			require.NoError(t, err)
+			require.Len(t, items, 1)
+			offset := spec.Variables["target_key"].Offset()
+			require.GreaterOrEqual(t, uint64(len(items[0].Value)), offset+4)
+			require.Equal(t, uint32(42), binary.NativeEndian.Uint32(items[0].Value[offset:offset+4]))
+		})
+	}
+}
+
 func TestLoadBPF_InvalidName(t *testing.T) {
 	for _, name := range rejectedNames {
 		t.Run(name, func(t *testing.T) {
@@ -226,7 +291,7 @@ func TestDefaultBPF_Lifecycle_And_Accessors(t *testing.T) {
 			"String",
 			func(t *testing.T) {
 				str := b.String()
-				expectedSubstr := fmt.Sprintf("%s#2#6", b.Name())
+				expectedSubstr := fmt.Sprintf("%s#3#6", b.Name())
 				assert.Contains(t, str, expectedSubstr)
 			},
 		},
@@ -235,7 +300,8 @@ func TestDefaultBPF_Lifecycle_And_Accessors(t *testing.T) {
 			func(t *testing.T) {
 				info, err := b.Info()
 				require.NoError(t, err)
-				require.Len(t, info.MapsInfo, 2)
+				// cilium/ebpf retains the read-only map for global variables.
+				require.Len(t, info.MapsInfo, 3)
 				require.Len(t, info.ProgramsInfo, 6)
 			},
 		},

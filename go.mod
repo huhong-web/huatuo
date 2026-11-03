@@ -5,7 +5,7 @@ go 1.24.3
 require (
 	capnproto.org/go/capnp/v3 v3.1.0-alpha.2
 	github.com/charmbracelet/bubbletea v1.3.10
-	github.com/cilium/ebpf v0.16.0
+	github.com/cilium/ebpf v0.19.0
 	github.com/cloudflare/backoff v0.0.0-20240920015135-e46b80a3a7d0
 	github.com/cloudflare/cbpfc v0.0.0-20250612101420-369091e6a9e1
 	github.com/containerd/cgroups/v3 v3.0.3
