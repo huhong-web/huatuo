@@ -1446,12 +1446,12 @@ func TestBlkThrotlObjectContract(t *testing.T) {
 	for _, expected := range maps {
 		requireIOControlTestMap(t, spec, expected)
 	}
-	require.NoError(t, spec.RewriteConstants(map[string]any{
+	requireIOControlTestConstants(t, spec, map[string]any{
 		"blk_throtl_tracked_caller_start": uint64(1),
 		"blk_throtl_tracked_caller_end":   uint64(2),
 		"blk_throtl_ignored_caller_start": uint64(3),
 		"blk_throtl_ignored_caller_end":   uint64(4),
-	}))
+	})
 }
 
 func TestBlkThrotlLifecycleRetainsCgroupCounters(t *testing.T) {
