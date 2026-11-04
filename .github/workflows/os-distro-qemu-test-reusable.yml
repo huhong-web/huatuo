@@ -89,6 +89,14 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Free host space for VM images and caches
+        run: |
+          df -h /
+          # These fresh hosted runners do not need Android, .NET, GHC, or CodeQL.
+          # Keep Go, Python, Node, Docker, and all VM test dependencies.
+          sudo rm -rf -- /usr/local/lib/android /usr/share/dotnet /opt/ghc /opt/hostedtoolcache/CodeQL
+          df -h /
+
       - name: Host Init
         run: |
           .github/workflows/scripts/qemu-0-host-init.sh "${{ matrix.arch }}"
@@ -174,7 +182,7 @@ jobs:
 
       - name: Run in VM
         id: run-in-vm
-        timeout-minutes: 90
+        timeout-minutes: 270
         run: |
           .github/workflows/scripts/qemu-2-run-in-vm.sh --test-only
 
@@ -212,6 +220,24 @@ jobs:
           UPTERM_SSH_COMMAND: ${{ steps.upterm-after.outputs.ssh-command }}
         run: |
           bash .github/workflows/scripts/qemu-debug-vm.sh
+
+      - name: Collect test-cilium evidence
+        if: always() && steps.start-vm.outcome == 'success'
+        timeout-minutes: 5
+        run: |
+          source "$VM_ENV_FILE"
+          evidence_dir="$RUNNER_TEMP/test-cilium-results"
+          mkdir -p "$evidence_dir"
+          printf -v transport 'ssh -i %q -o BatchMode=yes -o ConnectTimeout=15 -o ServerAliveInterval=15 -o ServerAliveCountMax=3 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null' "$VM_SSH_KEY"
+          timeout 180 rsync -az --timeout=60 -e "$transport" "root@$VM_IP:/mnt/host/_output/test-cilium-results/" "$evidence_dir/"
+
+      - name: Upload test-cilium evidence
+        if: always() && steps.start-vm.outcome == 'success'
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-cilium-${{ matrix.os }}-${{ matrix.arch }}
+          path: ${{ runner.temp }}/test-cilium-results
+          if-no-files-found: error
 
       - name: Cleanup VM
         if: always()
