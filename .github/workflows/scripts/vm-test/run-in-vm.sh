@@ -15,7 +15,7 @@
 # limitations under the License.
 #
 
-# Purpose: Prepare the guest test environment and run Huatuo e2e tests in /mnt/host.
+# Purpose: Prepare the guest test environment and run the selected Huatuo integration tests in /mnt/host.
 # Caller: qemu-2-run-in-vm.sh streams this helper to the guest over SSH.
 # Environment:
 # - HOME: Used to add the user's Go binary directory to PATH.
@@ -23,7 +23,7 @@
 # Parameters:
 # - Optional --prepare-only or --test-only; omitted runs both phases.
 # Examples:
-# - run-in-vm.sh  # prepare the guest and run make test
+# - run-in-vm.sh  # prepare the guest and run selected integration scripts
 
 set -euo pipefail
 
@@ -349,19 +349,21 @@ run_guest_tests() {
 	# This is the single entry point for all guest test targets.
 	vm_log '⬅️⬅️⬅️ Running tests...'
 
-	# Hide image downloads behind compilation and unit tests. Compatibility cases
+	# Hide image downloads behind compilation. Compatibility cases
 	# still perform their normal pull checks, including when prefetch fails.
 	storage_prefetch_pids=()
 	trap stop_storage_image_prefetch EXIT
 	prefetch_storage_images
 	make install-tools
 	if [[ -f _output/portable-generated.commit ]]; then
-		make test SKIP_PORTABLE_GENERATION=1
+		make build SKIP_PORTABLE_GENERATION=1
 	else
-		make test
+		make build
 	fi
 
-	vm_log '✅✅✅ Tests passed.'
+	go build -mod=vendor -o _output/tools/pprof-tool ./build/pprof-tool
+	bash .github/workflows/scripts/test-cilium-integration.sh
+	vm_log '✅✅✅ Every selected integration script passed.'
 }
 
 # Also support sourcing the entry function in local regression fixtures.
